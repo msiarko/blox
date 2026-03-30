@@ -2,104 +2,143 @@ const std = @import("std");
 const fmt = std.fmt;
 const Io = std.Io;
 const Sha256 = std.crypto.hash.sha2.Sha256;
-
-const DIGEST_SIZE: usize = Sha256.digest_length;
-const ZERO_HASH = [_]u8{0} ** DIGEST_SIZE;
-const GENESIS_DATA = "";
-const GENESIS_TIMESTAMP: i64 = 0;
-const GENESIS_HASH = hashData(GENESIS_TIMESTAMP, ZERO_HASH, GENESIS_DATA);
+const options = @import("core_options");
 
 const Hash = [DIGEST_SIZE]u8;
+const Timestamp = i64;
+const Nonce = u64;
 
-pub const GENESIS: @This() = .{
-    .timestamp = GENESIS_TIMESTAMP,
+const DIGEST_SIZE: usize = Sha256.digest_length;
+const ZERO_HASH: Hash = [_]u8{0} ** DIGEST_SIZE;
+const GENESIS_HASH = hashData(
+    options.GENESIS_TIMESTAMP,
+    &ZERO_HASH,
+    options.GENESIS_NONCE,
+    options.GENESIS_DATA,
+);
+
+pub const GENESIS: Block = .{
+    .timestamp = options.GENESIS_TIMESTAMP,
     .prev_hash = ZERO_HASH,
     .hash = GENESIS_HASH,
-    .data = GENESIS_DATA,
+    .nonce = options.GENESIS_NONCE,
+    .data = options.GENESIS_DATA,
 };
 
-prev_hash: [32]u8,
-hash: [32]u8,
-timestamp: i64,
-data: []const u8,
+pub const Block = struct {
+    prev_hash: Hash,
+    hash: Hash,
+    timestamp: Timestamp,
+    nonce: Nonce,
+    data: []const u8,
 
-fn hashData(timestamp: i64, prev_hash: Hash, data: []const u8) Hash {
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        if (std.meta.eql(self.hash, GENESIS_HASH)) return;
+        allocator.free(self.data);
+    }
+
+    pub fn init(io: Io, allocator: std.mem.Allocator, prev_hash: *const Hash, data: []const u8) !@This() {
+        if (data.len == 0) return error.EmptyData;
+        const result = generateHash(io, prev_hash, data);
+        const data_owned = try allocator.dupe(u8, data);
+        return .{
+            .timestamp = result.@"2",
+            .prev_hash = prev_hash.*,
+            .hash = result.@"0",
+            .nonce = result.@"1",
+            .data = data_owned,
+        };
+    }
+
+    pub fn isHashValid(self: *const @This()) bool {
+        const generated_hash = hashData(
+            self.timestamp,
+            &self.prev_hash,
+            self.nonce,
+            self.data,
+        );
+        return std.mem.eql(u8, &generated_hash, &self.hash);
+    }
+
+    pub fn jsonStringify(self: *const Block, stringify: anytype) !void {
+        try stringify.beginObject();
+
+        try stringify.objectField("timestamp");
+        try stringify.write(self.timestamp);
+
+        try stringify.objectField("prev_hash");
+        try stringify.write(std.fmt.bytesToHex(self.prev_hash, .lower)[0..]);
+
+        try stringify.objectField("hash");
+        try stringify.write(std.fmt.bytesToHex(self.hash, .lower)[0..]);
+
+        try stringify.objectField("nonce");
+        try stringify.write(self.nonce);
+
+        try stringify.objectField("data");
+        try stringify.write(self.data);
+
+        try stringify.endObject();
+    }
+};
+
+fn generateHash(io: Io, prev_hash: *const Hash, data: []const u8) struct { Hash, Nonce, Timestamp } {
+    var nonce: Nonce = 0;
+    while (true) : (nonce += 1) {
+        const timestamp = Io.Timestamp.now(io, .real).toMilliseconds();
+        const generated_hash = hashData(
+            timestamp,
+            prev_hash,
+            nonce,
+            data,
+        );
+
+        if (std.mem.startsWith(u8, &generated_hash, &[_]u8{0} ** options.DIFFICULTY))
+            return .{
+                generated_hash,
+                nonce,
+                timestamp,
+            };
+    }
+}
+
+fn hashData(timestamp: Timestamp, prev_hash: *const Hash, nonce: Nonce, data: []const u8) Hash {
     @setEvalBranchQuota(4000);
+
     var hasher: Sha256 = .init(.{});
     hasher.update(std.mem.asBytes(&timestamp));
-    hasher.update(&prev_hash);
+    hasher.update(prev_hash);
     hasher.update(data);
+    hasher.update(std.mem.asBytes(&nonce));
 
-    var out: Hash = undefined;
-    hasher.final(&out);
-    return out;
-}
-
-fn initInternal(gpa: std.mem.Allocator, timestamp: i64, prev_hash: Hash, data: []const u8) !@This() {
-    const hash = hashData(timestamp, prev_hash, data);
-    const data_owned = try gpa.dupe(u8, data);
-    return .{
-        .timestamp = timestamp,
-        .prev_hash = prev_hash,
-        .hash = hash,
-        .data = data_owned,
-    };
-}
-
-pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
-    gpa.free(self.data);
-}
-
-pub fn init(io: Io, gpa: std.mem.Allocator, prev_block: @This(), data: []const u8) !@This() {
-    if (data.len == 0) return error.EmptyData;
-    const timestamp = Io.Timestamp.now(io, .real);
-    const prev_hash = prev_block.hash;
-    return .initInternal(gpa, timestamp.toMilliseconds(), prev_hash, data);
-}
-
-pub fn jsonStringify(self: *const @This(), stringify: *std.json.Stringify) !void {
-    try stringify.beginObject();
-
-    try stringify.objectField("timestamp");
-    try stringify.write(self.timestamp);
-
-    try stringify.objectField("prev_hash");
-    try stringify.write(std.fmt.bytesToHex(self.prev_hash, .lower)[0..]);
-
-    try stringify.objectField("hash");
-    try stringify.write(std.fmt.bytesToHex(self.hash, .lower)[0..]);
-
-    try stringify.objectField("data");
-    try stringify.write(self.data);
-
-    try stringify.endObject();
+    return hasher.finalResult();
 }
 
 test "first mined block prev hash matches genesis hash" {
     const io = std.testing.io;
-    const gpa = std.testing.allocator;
+    const allocator = std.testing.allocator;
 
     const data = "Some data";
-    var block = try init(io, gpa, GENESIS, data);
-    defer block.deinit(gpa);
+    var block: Block = try .init(io, allocator, &GENESIS.hash, data);
+    defer block.deinit(allocator);
     try std.testing.expectEqual(GENESIS.hash, block.prev_hash);
 }
 
 test "init block data matches input" {
     const io = std.testing.io;
-    const gpa = std.testing.allocator;
+    const allocator = std.testing.allocator;
 
     const data = "some data";
-    var block = try init(io, gpa, GENESIS, data);
-    defer block.deinit(gpa);
+    var block: Block = try .init(io, allocator, &GENESIS.hash, data);
+    defer block.deinit(allocator);
     try std.testing.expectEqualSlices(u8, data, block.data);
 }
 
 test "init block with empty data fails" {
     const io = std.testing.io;
-    const gpa = std.testing.allocator;
+    const allocator = std.testing.allocator;
 
     const data = "";
-    const block = init(io, gpa, GENESIS, data);
+    const block = Block.init(io, allocator, &GENESIS.hash, data);
     try std.testing.expectError(error.EmptyData, block);
 }

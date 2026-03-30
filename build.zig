@@ -4,12 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const core = b.addModule("core", .{
-        .root_source_file = b.path("src/core/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
+    const core = setup_core(b, target, optimize);
     const mod = b.addModule("blox", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -30,13 +25,6 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-
-    const httpz = b.dependency("httpz", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    exe.root_module.addImport("httpz", httpz.module("httpz"));
 
     b.installArtifact(exe);
 
@@ -74,4 +62,21 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+}
+
+fn setup_core(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const core = b.addModule("core", .{
+        .root_source_file = b.path("src/core/blockchain.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const core_options = b.addOptions();
+    core_options.addOption(u8, "DIFFICULTY", 2);
+    core_options.addOption([]const u8, "GENESIS_DATA", "GENESIS");
+    core_options.addOption(i64, "GENESIS_TIMESTAMP", 199204);
+    core_options.addOption(u64, "GENESIS_NONCE", 3349);
+    core.addOptions("core_options", core_options);
+
+    return core;
 }
