@@ -42,10 +42,10 @@ pub const Block = struct {
         const result = generateHash(io, prev_hash, data);
         const data_owned = try allocator.dupe(u8, data);
         return .{
-            .timestamp = result.@"2",
+            .timestamp = result.timestamp,
             .prev_hash = prev_hash.*,
-            .hash = result.@"0",
-            .nonce = result.@"1",
+            .hash = result.hash,
+            .nonce = result.nonce,
             .data = data_owned,
         };
     }
@@ -82,7 +82,13 @@ pub const Block = struct {
     }
 };
 
-fn generateHash(io: Io, prev_hash: *const Hash, data: []const u8) struct { Hash, Nonce, Timestamp } {
+const GenerateHashResult = struct {
+    hash: Hash,
+    nonce: Nonce,
+    timestamp: Timestamp,
+};
+
+fn generateHash(io: Io, prev_hash: *const Hash, data: []const u8) GenerateHashResult {
     var nonce: Nonce = 0;
     while (true) : (nonce += 1) {
         const timestamp = Io.Timestamp.now(io, .real).toMilliseconds();
@@ -95,9 +101,9 @@ fn generateHash(io: Io, prev_hash: *const Hash, data: []const u8) struct { Hash,
 
         if (std.mem.startsWith(u8, &generated_hash, &[_]u8{0} ** options.DIFFICULTY))
             return .{
-                generated_hash,
-                nonce,
-                timestamp,
+                .hash = generated_hash,
+                .nonce = nonce,
+                .timestamp = timestamp,
             };
     }
 }

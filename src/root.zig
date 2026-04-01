@@ -22,13 +22,30 @@ pub const AppState = struct {
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, app_state: *AppState) !void {
     var server: web.Server(AppState) = .init(allocator, io, app_state);
-
+    try server.router.get("/ws", handleWebSocket);
     try server.router.get("/blocks", handleBlocks);
     try server.router.post("/mine", handleMine);
-
     defer server.deinit();
 
     try server.listen(8080);
+}
+
+fn handleWebSocket(_: *web.Context(AppState), req: web.Request) !void {
+    var ws = try req.upgradeWebsocket();
+    defer ws.flush() catch {};
+
+    while (true) {
+        const msg = try ws.readSmallMessage();
+        switch (msg.opcode) {
+            .text => {
+                const response = try std.fmt.allocPrint(req.allocator, "Hello, {s}", .{msg.data});
+                defer req.allocator.free(response);
+                try ws.writeMessage(response, .text);
+            },
+            .connection_close => break,
+            else => std.log.info("Received Web Socket Message: {}", .{msg.opcode}),
+        }
+    }
 }
 
 fn handleBlocks(ctx: *web.Context(AppState), req: web.Request) !void {
@@ -48,19 +65,7 @@ fn handleBlocks(ctx: *web.Context(AppState), req: web.Request) !void {
 }
 
 fn handleMine(ctx: *web.Context(AppState), req: web.Request) !void {
-    const transfer_buffer = try req.allocator.alloc(u8, req.http_req.head.content_length.?);
-    defer req.allocator.free(transfer_buffer);
-
-    const reader = req.http_req.server.reader.bodyReader(
-        transfer_buffer,
-        req.http_req.head.transfer_encoding,
-        req.http_req.head.content_length,
-    );
-
-    const data = try reader.readAlloc(req.allocator, req.http_req.head.content_length.?);
-    defer req.allocator.free(data);
-
-    const mine_req = try std.json.parseFromSlice(MineRequest, req.allocator, data, .{});
+    const mine_req = try req.body_as_json(MineRequest);
     defer mine_req.deinit();
 
     try ctx.state.lock.lock(ctx.io);
