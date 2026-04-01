@@ -5,12 +5,14 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const core = setup_core(b, target, optimize);
+    const web = setup_web(b, target, optimize);
     const mod = b.addModule("blox", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
             .{ .name = "core", .module = core },
+            .{ .name = "web", .module = web },
         },
     });
 
@@ -62,6 +64,16 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+}
+
+fn setup_web(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const web = b.addModule("web", .{
+        .root_source_file = b.path("src/web/server.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    return web;
 }
 
 fn setup_core(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {

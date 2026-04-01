@@ -1,11 +1,9 @@
 const std = @import("std");
-const Io = std.Io;
-
 const blox = @import("blox");
-const Application = blox.Application;
 
 pub fn main(init: std.process.Init) !void {
-    const arena = init.arena.allocator();
-    var app: Application = try .init(arena);
-    try app.run(init.io, arena);
+    var app_state: blox.AppState = try .init(init.gpa);
+    defer app_state.deinit(init.gpa);
+
+    try blox.run(init.io, init.gpa, &app_state);
 }
