@@ -2,29 +2,30 @@ const b = @import("block.zig");
 const Block = b.Block;
 const std = @import("std");
 
-const Blocks = std.ArrayList(Block);
+pub const DIGEST_SIZE: usize = b.DIGEST_SIZE;
 
 pub const Blockchain = struct {
-    blocks: Blocks,
+    pub const Item = Block;
+
+    blocks: std.ArrayList(Item),
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
-        var blocks: Blocks = .empty;
+        var blocks: std.ArrayList(Item) = .empty;
         try blocks.append(allocator, b.GENESIS);
-
-        return .{
-            .blocks = blocks,
-        };
+        return .{ .blocks = blocks };
     }
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
         for (self.blocks.items) |*block| {
             block.deinit(allocator);
         }
+
         self.blocks.deinit(allocator);
     }
 
     pub fn add(self: *@This(), io: std.Io, allocator: std.mem.Allocator, data: []const u8) !void {
         if (self.blocks.items.len == 0) return error.BlockchainEmpty;
+
         const prev_block = &self.blocks.items[self.blocks.items.len - 1];
         const new_block: Block = try .init(io, allocator, &prev_block.hash, data);
         try self.blocks.append(allocator, new_block);
@@ -34,16 +35,31 @@ pub const Blockchain = struct {
         if (self.blocks.items.len == 0) return false;
 
         const genesis = &self.blocks.items[0];
-
-        if (!std.meta.eql(genesis.*, b.GENESIS)) return false;
+        if (!genesis.eql(&b.GENESIS)) return false;
 
         for (1..self.blocks.items.len) |i| {
             const curr = &self.blocks.items[i];
             const prev = &self.blocks.items[i - 1];
-            if (!std.mem.eql(u8, &curr.prev_hash, &prev.hash) or !curr.isHashValid()) return false;
+            if (!std.mem.eql(u8, &curr.prev_hash, &prev.hash) or !curr.isHashValid())
+                return false;
         }
 
         return true;
+    }
+
+    pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Item) !@This() {
+        var blocks: std.ArrayList(Item) = .empty;
+        for (slice) |item| {
+            try blocks.append(allocator, .{
+                .timestamp = item.timestamp,
+                .prev_hash = item.prev_hash,
+                .hash = item.hash,
+                .nonce = item.nonce,
+                .data = try allocator.dupe(u8, item.data),
+            });
+        }
+
+        return .{ .blocks = blocks };
     }
 
     pub fn replace(self: *@This(), allocator: std.mem.Allocator, chain: *const @This()) !void {
@@ -65,9 +81,7 @@ pub const Blockchain = struct {
     pub fn json(self: *const @This(), writer: *std.Io.Writer) !void {
         var stringify: std.json.Stringify = .{
             .writer = writer,
-            .options = .{
-                .whitespace = .indent_2,
-            },
+            .options = .{ .whitespace = .indent_2 },
         };
         try stringify.write(self.blocks.items);
     }

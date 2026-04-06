@@ -8,7 +8,7 @@ const Hash = [DIGEST_SIZE]u8;
 const Timestamp = i64;
 const Nonce = u64;
 
-const DIGEST_SIZE: usize = Sha256.digest_length;
+pub const DIGEST_SIZE: usize = Sha256.digest_length;
 const ZERO_HASH: Hash = [_]u8{0} ** DIGEST_SIZE;
 const GENESIS_HASH = hashData(
     options.GENESIS_TIMESTAMP,
@@ -79,6 +79,14 @@ pub const Block = struct {
         try stringify.write(self.data);
 
         try stringify.endObject();
+    }
+
+    pub fn eql(self: *const @This(), other: *const @This()) bool {
+        return self.timestamp == other.timestamp and
+            std.mem.eql(u8, &self.prev_hash, &other.prev_hash) and
+            std.mem.eql(u8, &self.hash, &other.hash) and
+            self.nonce == other.nonce and
+            std.mem.eql(u8, self.data, other.data);
     }
 };
 

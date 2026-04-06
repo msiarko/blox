@@ -3,7 +3,12 @@
     .version = "0.0.0",
     .fingerprint = 0x4d1d5cb61ec14f7a,
     .minimum_zig_version = "0.16.0-dev.2984+cb7d2b056",
-    .dependencies = .{},
+    .dependencies = .{
+        .volt = .{
+            .url = "git+https://github.com/MikhailSiarko/volt?ref=v0.0.1#f380b502108afc993ec820c21a79d57263d9e40a",
+            .hash = "volt-0.0.1-ZvV_WTmwAABqhaNJCZNYWGgjONE5wR9-kMbp1UCStpco",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
