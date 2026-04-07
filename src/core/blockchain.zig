@@ -5,17 +5,19 @@ const std = @import("std");
 pub const DIGEST_SIZE: usize = b.DIGEST_SIZE;
 
 pub const Blockchain = struct {
+    const Self = @This();
+
     pub const Item = Block;
 
     blocks: std.ArrayList(Item),
 
-    pub fn init(allocator: std.mem.Allocator) !@This() {
+    pub fn init(allocator: std.mem.Allocator) !Self {
         var blocks: std.ArrayList(Item) = .empty;
         try blocks.append(allocator, b.GENESIS);
         return .{ .blocks = blocks };
     }
 
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         for (self.blocks.items) |*block| {
             block.deinit(allocator);
         }
@@ -23,7 +25,7 @@ pub const Blockchain = struct {
         self.blocks.deinit(allocator);
     }
 
-    pub fn add(self: *@This(), io: std.Io, allocator: std.mem.Allocator, data: []const u8) !void {
+    pub fn add(self: *Self, io: std.Io, allocator: std.mem.Allocator, data: []const u8) !void {
         if (self.blocks.items.len == 0) return error.BlockchainEmpty;
 
         const prev_block = &self.blocks.items[self.blocks.items.len - 1];
@@ -31,7 +33,7 @@ pub const Blockchain = struct {
         try self.blocks.append(allocator, new_block);
     }
 
-    fn isValid(self: *const @This()) bool {
+    fn isValid(self: *const Self) bool {
         if (self.blocks.items.len == 0) return false;
 
         const genesis = &self.blocks.items[0];
@@ -47,7 +49,7 @@ pub const Blockchain = struct {
         return true;
     }
 
-    pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Item) !@This() {
+    pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Item) !Self {
         var blocks: std.ArrayList(Item) = .empty;
         for (slice) |item| {
             try blocks.append(allocator, .{
@@ -62,7 +64,7 @@ pub const Blockchain = struct {
         return .{ .blocks = blocks };
     }
 
-    pub fn replace(self: *@This(), allocator: std.mem.Allocator, chain: *const @This()) !void {
+    pub fn replace(self: *Self, allocator: std.mem.Allocator, chain: *const Self) !void {
         if (self.blocks.items.len >= chain.blocks.items.len) return error.ChainLengthIsEqualOrLess;
         if (!chain.isValid()) return error.InvalidChain;
 
@@ -78,7 +80,7 @@ pub const Blockchain = struct {
         }
     }
 
-    pub fn json(self: *const @This(), writer: *std.Io.Writer) !void {
+    pub fn json(self: *const Self, writer: *std.Io.Writer) !void {
         var stringify: std.json.Stringify = .{
             .writer = writer,
             .options = .{ .whitespace = .indent_2 },

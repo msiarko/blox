@@ -5,6 +5,7 @@ const WebSocket = std.http.Server.WebSocket;
 
 const core = @import("core");
 const volt = @import("volt");
+const extractors = volt.extractors;
 
 pub const AppState = struct {
     lock: std.Io.Mutex,
@@ -34,8 +35,8 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator) !void {
     try server.listen(address, .{});
 }
 
-fn webSockets(ctx: volt.Context, state: *AppState, ws: volt.WebSocket) !volt.Response {
-    try ws.onUpgrade(handleWebSocket, .{ ctx, state });
+fn webSockets(ctx: volt.Context, state: *AppState, ws: extractors.WebSocket) !volt.Response {
+    try ws.onConnected(handleWebSocket, .{ ctx, state });
     return ws.intoResponse();
 }
 
@@ -84,13 +85,13 @@ fn blocks(ctx: volt.Context, state: *AppState) !volt.Response {
     return .json(ctx.request_allocator, .ok, content, null);
 }
 
-fn mine(ctx: volt.Context, state: *AppState, mine_request: volt.Json(MineRequest)) !volt.Response {
+fn mine(ctx: volt.Context, state: *AppState, mine_request: extractors.Json(MineRequest)) !volt.Response {
     try state.lock.lock(ctx.io);
     defer state.lock.unlock(ctx.io);
 
     const payload = try mine_request.value;
     try state.chain.add(ctx.io, ctx.server_allocator, payload.data);
-    return .text(ctx.request_allocator, .ok, "Block mined successfully", null);
+    return .ok(ctx.request_allocator, "Block mined successfully", null);
 }
 
 const MineRequest = struct {
