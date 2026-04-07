@@ -89,9 +89,27 @@ fn mine(ctx: volt.Context, state: *AppState, mine_request: extractors.Json(MineR
     try state.lock.lock(ctx.io);
     defer state.lock.unlock(ctx.io);
 
-    const payload = try mine_request.value;
+    const payload = mine_request.value catch |err| {
+        if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and !isMemberOfErrorSet(std.mem.Allocator.Error, err)) {
+            return .text(ctx.request_allocator, .bad_request, @errorName(err), null);
+        }
+
+        return .text(ctx.request_allocator, .internal_server_error, @errorName(err), null);
+    };
     try state.chain.add(ctx.io, ctx.server_allocator, payload.data);
     return .ok(ctx.request_allocator, "Block mined successfully", null);
+}
+
+pub fn isMemberOfErrorSet(comptime T: type, err: anyerror) bool {
+    const info = @typeInfo(T);
+    if (info != .error_set) @compileError("T should be an error set");
+
+    const error_set = info.error_set orelse false;
+    inline for (error_set) |err_field| {
+        if (err == @field(T, err_field.name)) return true;
+    }
+
+    return false;
 }
 
 const MineRequest = struct {
