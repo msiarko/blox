@@ -3,7 +3,9 @@ const Io = std.Io;
 
 const core = @import("core");
 
-const AppState = @import("state.zig").AppState;
+const state_mod = @import("state.zig");
+const AppState = state_mod.AppState;
+const MAX_PEERS_COUNT = state_mod.MAX_PEERS_COUNT;
 const Peer = @import("peer.zig").Peer;
 
 pub const ClientWebSocket = struct {
@@ -114,9 +116,10 @@ pub const ClientWebSocket = struct {
 /// Performs the HTTP/1.1 → WebSocket upgrade handshake on an existing TCP
 /// stream and returns a ready-to-use ClientWebSocket.
 /// A fresh random key is generated per call (one per connection).
+/// No heap allocation: the handshake request is written into a 512-byte
+/// stack buffer via bufPrint.
 pub fn connectWebSocket(
     io: Io,
-    allocator: std.mem.Allocator,
     state: *AppState,
     peer: *Peer,
     reader: *Io.net.Stream.Reader,
@@ -135,16 +138,17 @@ pub fn connectWebSocket(
     // Send our own URI (with scheme) so the server can parse it with std.Uri.
     const blox_peer_uri = state.self_peer.uri_string;
 
-    // Use the URI path if one was provided, otherwise fall back to "/ws"
-    // (the only WebSocket endpoint on every blox node).
+    // Use the URI path if one was provided, otherwise fall back to "/ws".
     const path_raw = switch (peer.uri.path) {
         .raw => |p| p,
         .percent_encoded => |p| p,
     };
     const path = if (path_raw.len == 0) "/ws" else path_raw;
 
-    const handshake = try std.fmt.allocPrint(
-        allocator,
+    // Stack buffer: typical handshake is ~200 bytes; 512 is a safe ceiling.
+    var handshake_buf: [512]u8 = undefined;
+    const handshake = try std.fmt.bufPrint(
+        &handshake_buf,
         "GET {s} HTTP/1.1\r\n" ++
             "Host: {s}\r\n" ++
             "Upgrade: websocket\r\n" ++
@@ -154,7 +158,6 @@ pub fn connectWebSocket(
             "Blox-Peer-Uri: {s}\r\n\r\n",
         .{ path, host_header, key, blox_peer_uri },
     );
-    defer allocator.free(handshake);
 
     try writer.interface.writeAll(handshake);
     try writer.interface.flush();
@@ -203,6 +206,11 @@ pub fn applyChainUpdate(
     state: *AppState,
     json: []const u8,
 ) !void {
+    // IMPORTANT: `allocator` must be the server (long-lived) allocator.
+    // It is forwarded to `Blockchain.replace`, which uses it for persistent
+    // chain storage (ArrayList backing buffer + block data dups). Passing a
+    // request-scoped arena will free those allocations when the request ends,
+    // corrupting the chain.
     const parsed = std.json.parseFromSlice([]const BlockJson, allocator, json, .{}) catch |err| {
         if (err == error.OutOfMemory) return err;
         std.log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
@@ -210,21 +218,50 @@ pub fn applyChainUpdate(
     };
     defer parsed.deinit();
 
-    const parsed_blocks: []core.Block = try allocator.alloc(core.Block, parsed.value.len);
-    defer allocator.free(parsed_blocks);
+    // Build the Blockchain's block list in one allocation (initCapacity),
+    // appending directly without the intermediate parsed_blocks array and
+    // without the second ArrayList that Blockchain.fromSlice would allocate.
+    var blocks = try std.ArrayList(core.Block).initCapacity(allocator, parsed.value.len);
 
-    const blocks_ok = blk: {
-        for (parsed.value, 0..) |item, i| {
-            parsed_blocks[i] = item.toBlock() catch |err| {
-                std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
-                break :blk false;
-            };
-        }
-        break :blk true;
+    // Ownership-transfer flag: set to `true` once the ArrayList is moved into
+    // `new_chain`, so that the defer below does not double-free the blocks
+    // after ownership has been transferred.
+    var blocks_owned = false;
+    defer if (!blocks_owned) {
+        for (blocks.items) |*b| b.deinit(allocator);
+        blocks.deinit(allocator);
     };
-    if (!blocks_ok) return;
 
-    var new_chain: core.Blockchain = try core.Blockchain.fromSlice(allocator, parsed_blocks);
+    for (parsed.value) |item| {
+        const b = item.toBlock() catch |err| {
+            std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
+            return; // defer above handles cleanup
+        };
+        // `b.data` points into `parsed`'s JSON buffer, which is freed by
+        // `defer parsed.deinit()` at the end of this function. This dup makes
+        // the data outlive `parsed`. The dup lives in `new_chain` and is freed
+        // by `new_chain.deinit` — a second dup into the persistent chain is
+        // made inside `Blockchain.replace`.
+        const owned_data = try allocator.dupe(u8, b.data);
+        // appendAssumeCapacity never fails: we pre-allocated exactly parsed.value.len.
+        blocks.appendAssumeCapacity(.{
+            .timestamp = b.timestamp,
+            .prev_hash = b.prev_hash,
+            .hash = b.hash,
+            .nonce = b.nonce,
+            .data = owned_data,
+        });
+    }
+
+    // Transfer ownership directly into Blockchain, bypassing fromSlice's
+    // second ArrayList allocation.
+    var new_chain: core.Blockchain = .{ .blocks = blocks };
+    // Ownership of the ArrayList (and the duped block data inside it) is
+    // transferred to `new_chain` here; the defer above must no longer free it.
+    blocks_owned = true;
+    // `new_chain` is temporary. Its blocks (the first dup of each block's
+    // `data`) are freed here via deinit. The persistent chain already holds
+    // its own second dup of each block's data (made inside `Blockchain.replace`).
     defer new_chain.deinit(allocator);
 
     state.replaceChain(io, allocator, &new_chain) catch |err| {
@@ -254,13 +291,27 @@ pub fn connectToPeers(
     var connections: Io.Group = .init;
     defer connections.cancel(io);
 
-    // Collect a lock-protected snapshot of peer pointers. The *Peer values
-    // are heap-allocated (stable addresses) so they remain valid even if the
-    // hashmap is later resized by an incoming connection.
-    const peer_ptrs = try state.getPeerPtrs(io, allocator);
-    defer allocator.free(peer_ptrs);
+    // Snapshot peer pointers into a stack array while holding the lock.
+    // *Peer values are heap-allocated (stable), so these pointers remain
+    // valid after the lock is released even if the hashmap is later resized.
+    var peer_buf: [MAX_PEERS_COUNT]*Peer = undefined;
+    var peer_count: usize = 0;
+    {
+        try state.lock.lock(io);
+        defer state.lock.unlock(io);
+        var it = state.peers.valueIterator();
+        while (it.next()) |ptr| {
+            if (peer_count < peer_buf.len) {
+                peer_buf[peer_count] = ptr.*;
+                peer_count += 1;
+            } else {
+                std.log.warn("connectToPeers: peer count exceeds max_peers ({d}), extra peers skipped", .{MAX_PEERS_COUNT});
+                break;
+            }
+        }
+    }
 
-    for (peer_ptrs) |peer_ptr| {
+    for (peer_buf[0..peer_count]) |peer_ptr| {
         connections.async(io, subscribeChainUpdates, .{ io, allocator, state, peer_ptr });
     }
 
@@ -322,7 +373,7 @@ fn runPeerSession(
     var read_buf: [4096]u8 = undefined;
     var reader = stream.reader(io, &read_buf);
 
-    var ws = try connectWebSocket(io, allocator, state, peer, &reader, &writer);
+    var ws = try connectWebSocket(io, state, peer, &reader, &writer);
 
     // Drain any stale chain snapshots that accumulated in the peer's queue
     // while the connection was down.  queue.get(..., 0) is guaranteed to

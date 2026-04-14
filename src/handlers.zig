@@ -42,8 +42,12 @@ fn handleWebSocket(ctx: volt.Context, state: *AppState, peer_uri: []const u8, ws
         const msg = try ws.readSmallMessage();
         switch (msg.opcode) {
             .text => {
-                std.log.info("Received chain update from inbound peer", .{});
-                try p2p.applyChainUpdate(ctx.io, ctx.request_allocator, state, msg.data);
+                std.log.info("Received chain update from inbound peer {s}", .{peer_key});
+                // MUST use `server_allocator`, NOT `request_allocator`. This allocator is
+                // forwarded to `Blockchain.replace`, which uses it to grow the chain's ArrayList
+                // backing buffer and dup block data into the persistent chain. These allocations
+                // must outlive this WebSocket connection (and all future reconnects).
+                try p2p.applyChainUpdate(ctx.io, ctx.server_allocator, state, msg.data);
             },
             .connection_close => {
                 std.log.info("Peer {s} closed the connection", .{peer_key});
@@ -88,6 +92,8 @@ pub fn mine(ctx: volt.Context, state: *AppState, mine_request: volt.extract.Json
         return .internal_server_error(ctx.request_allocator, "", null);
     };
 
+    // `server_allocator` required — the mined Block's `data` is appended to the
+    // persistent chain and must not be tied to the lifetime of this HTTP request.
     try state.addBlock(ctx.io, ctx.server_allocator, payload.data);
     try state.broadcastChain(ctx.io, ctx.server_allocator);
     return .ok(ctx.request_allocator, "Block mined successfully", null);

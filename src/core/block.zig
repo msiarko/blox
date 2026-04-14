@@ -17,6 +17,9 @@ const GENESIS_HASH = hashData(
     options.GENESIS_DATA,
 );
 
+// Comptime constant — every field, including `data`, is baked into the binary as a
+// string literal sourced from `options.GENESIS_DATA`. `data` is NOT heap-allocated
+// and must never be passed to `allocator.free`.
 pub const GENESIS: Block = .{
     .timestamp = options.GENESIS_TIMESTAMP,
     .prev_hash = ZERO_HASH,
@@ -33,6 +36,9 @@ pub const Block = struct {
     data: []const u8,
 
     pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        // Guard: the genesis block's `data` points at a comptime string literal, not a
+        // heap allocation. Calling `allocator.free` on it would be undefined behaviour,
+        // so we bail out early whenever this block is the genesis block.
         if (std.meta.eql(self.hash, GENESIS_HASH)) return;
         allocator.free(self.data);
     }
@@ -40,6 +46,9 @@ pub const Block = struct {
     pub fn init(io: Io, allocator: std.mem.Allocator, prev_hash: *const Hash, data: []const u8) !@This() {
         if (data.len == 0) return error.EmptyData;
         const result = generateHash(io, prev_hash, data);
+        // Ownership transfer: the caller supplies a (possibly stack/temporary) slice;
+        // we dup it into a fresh heap allocation so that this `Block` owns its `data`
+        // for its entire lifetime. `deinit` is responsible for freeing it.
         const data_owned = try allocator.dupe(u8, data);
         return .{
             .timestamp = result.timestamp,

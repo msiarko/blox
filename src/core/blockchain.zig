@@ -11,15 +11,22 @@ pub const Blockchain = struct {
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         var blocks: std.ArrayList(Block) = .empty;
+        // GENESIS is copied by value into the ArrayList. Its `data` field points at a
+        // comptime string literal (not a heap allocation). `Block.deinit` detects this
+        // via the hash guard and skips the free, so it is safe to deinit like any other block.
         try blocks.append(allocator, b.GENESIS);
         return .{ .blocks = blocks };
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        // Safe to call `deinit` on every block including genesis: `Block.deinit`
+        // uses a hash guard to skip `allocator.free` for the genesis block's comptime `data`.
         for (self.blocks.items) |*block| {
             block.deinit(allocator);
         }
 
+        // `allocator` must be the same allocator used in every prior `append` / `replace`
+        // call that grew this ArrayList. Mixing allocators here is undefined behaviour.
         self.blocks.deinit(allocator);
     }
 
@@ -31,6 +38,9 @@ pub const Blockchain = struct {
         if (!std.mem.eql(u8, &item.prev_hash, &prev_block.hash))
             return error.InvalidPreviousHash;
 
+        // `item` is moved by value into the ArrayList; ownership of `item.data` transfers
+        // here. The caller must have heap-allocated `item.data` with this same `allocator`
+        // so that `deinit` can free it correctly.
         try self.blocks.append(allocator, item);
     }
 
@@ -58,6 +68,8 @@ pub const Blockchain = struct {
                 .prev_hash = item.prev_hash,
                 .hash = item.hash,
                 .nonce = item.nonce,
+                // Each block's `data` is duped into a fresh heap allocation owned by the
+                // returned `Blockchain`. The caller is responsible for calling `deinit`.
                 .data = try allocator.dupe(u8, item.data),
             });
         }
@@ -74,6 +86,10 @@ pub const Blockchain = struct {
         if (self.blocks.items.len >= chain.blocks.items.len) return error.ChainLengthIsEqualOrLess;
         if (!chain.isValid()) return error.InvalidChain;
 
+        // IMPORTANT: `allocator` must have the same (or longer) lifetime as `self`.
+        // It is used to (1) grow `self.blocks`'s backing buffer and (2) dup each incoming
+        // block's `data` into the persistent chain. Using a request-scoped arena here will
+        // corrupt the chain when the arena is freed.
         for (self.blocks.items.len..chain.blocks.items.len) |i| {
             const block = &chain.blocks.items[i];
             try self.blocks.append(allocator, .{
