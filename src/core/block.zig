@@ -4,11 +4,11 @@ const Io = std.Io;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const options = @import("core_options");
 
-const Hash = [DIGEST_SIZE]u8;
+pub const Hash = [DIGEST_SIZE]u8;
 const Timestamp = i64;
 const Nonce = u64;
 
-pub const DIGEST_SIZE: usize = Sha256.digest_length;
+const DIGEST_SIZE: usize = Sha256.digest_length;
 const ZERO_HASH: Hash = [_]u8{0} ** DIGEST_SIZE;
 const GENESIS_HASH = hashData(
     options.GENESIS_TIMESTAMP,

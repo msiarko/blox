@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const core = setup_core(b, target, optimize);
+    const core = setupCore(b, target, optimize);
     const mod = b.addModule("blox", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -70,7 +70,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
 }
 
-fn setup_core(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+fn setupCore(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
     const core = b.addModule("core", .{
         .root_source_file = b.path("src/core/blockchain.zig"),
         .target = target,

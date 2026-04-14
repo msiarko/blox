@@ -1,18 +1,16 @@
-const b = @import("block.zig");
-const Block = b.Block;
 const std = @import("std");
+const b = @import("block.zig");
 
-pub const DIGEST_SIZE: usize = b.DIGEST_SIZE;
+pub const Block = b.Block;
+pub const Hash = b.Hash;
 
 pub const Blockchain = struct {
     const Self = @This();
 
-    pub const Item = Block;
-
-    blocks: std.ArrayList(Item),
+    blocks: std.ArrayList(Block),
 
     pub fn init(allocator: std.mem.Allocator) !Self {
-        var blocks: std.ArrayList(Item) = .empty;
+        var blocks: std.ArrayList(Block) = .empty;
         try blocks.append(allocator, b.GENESIS);
         return .{ .blocks = blocks };
     }
@@ -25,12 +23,15 @@ pub const Blockchain = struct {
         self.blocks.deinit(allocator);
     }
 
-    pub fn add(self: *Self, io: std.Io, allocator: std.mem.Allocator, data: []const u8) !void {
-        if (self.blocks.items.len == 0) return error.BlockchainEmpty;
+    pub fn add(self: *Self, allocator: std.mem.Allocator, item: Block) !void {
+        if (self.blocks.items.len == 0)
+            return error.BlockchainEmpty;
 
         const prev_block = &self.blocks.items[self.blocks.items.len - 1];
-        const new_block: Block = try .init(io, allocator, &prev_block.hash, data);
-        try self.blocks.append(allocator, new_block);
+        if (!std.mem.eql(u8, &item.prev_hash, &prev_block.hash))
+            return error.InvalidPreviousHash;
+
+        try self.blocks.append(allocator, item);
     }
 
     fn isValid(self: *const Self) bool {
@@ -49,8 +50,8 @@ pub const Blockchain = struct {
         return true;
     }
 
-    pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Item) !Self {
-        var blocks: std.ArrayList(Item) = .empty;
+    pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Block) !Self {
+        var blocks: std.ArrayList(Block) = .empty;
         for (slice) |item| {
             try blocks.append(allocator, .{
                 .timestamp = item.timestamp,
@@ -62,6 +63,11 @@ pub const Blockchain = struct {
         }
 
         return .{ .blocks = blocks };
+    }
+
+    pub fn getLastHash(self: *const Self) !Hash {
+        if (self.blocks.items.len == 0) return error.BlockchainEmpty;
+        return self.blocks.items[self.blocks.items.len - 1].hash;
     }
 
     pub fn replace(self: *Self, allocator: std.mem.Allocator, chain: *const Self) !void {

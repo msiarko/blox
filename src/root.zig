@@ -1,141 +1,56 @@
 const std = @import("std");
-const Io = std.Io;
-const IpAddress = std.Io.net.IpAddress;
-const WebSocket = std.http.Server.WebSocket;
-
-const core = @import("core");
 const volt = @import("volt");
-const extractors = volt.extractors;
+const Environ = std.process.Environ;
+const IpAddress = std.Io.net.IpAddress;
 
-pub const AppState = struct {
-    lock: std.Io.Mutex,
-    chain: core.Blockchain,
-
-    pub fn init(allocator: std.mem.Allocator) !@This() {
-        return .{ .lock = .init, .chain = try .init(allocator) };
-    }
-
-    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-        self.chain.deinit(allocator);
-    }
-};
+const AppState = @import("state.zig").AppState;
+const p2p = @import("p2p.zig");
+const handlers = @import("handlers.zig");
+const env = @import("env.zig");
+const peer = @import("peer.zig");
 
 const Server = volt.Server(AppState);
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator) !void {
-    var state: AppState = try .init(allocator);
-    defer state.deinit(allocator);
-    var server: Server = try .init(allocator, io, state);
-    try server.router.get("/ws", &webSockets);
-    try server.router.get("/blocks", &blocks);
-    try server.router.post("/mine", &mine);
+pub fn run(io: std.Io, allocator: std.mem.Allocator, env_map: *Environ.Map) !void {
+    var env_arena = std.heap.ArenaAllocator.init(allocator);
+    defer env_arena.deinit();
+
+    try env.setupEnv(io, env_arena.allocator(), env_map);
+
+    const peers = try getPeers(allocator, env_map);
+    const http_port = blk: {
+        const port = env_map.get("HTTP_PORT") orelse "8080";
+        break :blk try std.fmt.parseInt(u16, port, 10);
+    };
+
+    const address: IpAddress = try .parse("127.0.0.1", http_port);
+    const self_peer = try peer.initFromAddress(allocator, address);
+
+    var state: AppState = try .init(allocator, self_peer, peers);
+    defer state.deinit(io, allocator);
+
+    allocator.free(peers);
+
+    var server: Server = try .init(allocator, io, state, .{});
     defer server.deinit();
 
-    const address: IpAddress = try .parse("127.0.0.1", 8080);
-    try server.listen(address, .{});
+    try server.router.get("/ws", &handlers.webSockets);
+    try server.router.get("/blocks", &handlers.blocks);
+    try server.router.post("/mine", &handlers.mine);
+
+    var peer_connections = io.async(p2p.connectToPeers, .{ io, allocator, &state });
+    defer peer_connections.cancel(io) catch {};
+
+    try server.listen(address);
 }
 
-fn webSockets(ctx: volt.Context, state: *AppState, ws: extractors.WebSocket) !volt.Response {
-    try ws.onConnected(handleWebSocket, .{ ctx, state });
-    return ws.intoResponse();
-}
-
-fn handleWebSocket(ctx: volt.Context, state: *AppState, ws: *WebSocket) !void {
-    while (true) {
-        const msg = try ws.readSmallMessage();
-        switch (msg.opcode) {
-            .text => {
-                const parsed = std.json.parseFromSlice([]const BlockJson, ctx.request_allocator, msg.data, .{}) catch |err| {
-                    try ws.writeMessage(@errorName(err), .text);
-                    continue;
-                };
-                defer parsed.deinit();
-
-                const parsed_blocks: []core.Blockchain.Item = try ctx.request_allocator.alloc(core.Blockchain.Item, parsed.value.len);
-                defer ctx.request_allocator.free(parsed_blocks);
-
-                for (parsed.value, 0..) |item, i| {
-                    parsed_blocks[i] = try item.toBlock();
-                }
-
-                const new_chain: core.Blockchain = try .fromSlice(ctx.request_allocator, parsed_blocks);
-
-                try state.lock.lock(ctx.io);
-                defer state.lock.unlock(ctx.io);
-
-                state.chain.replace(ctx.server_allocator, &new_chain) catch |err| {
-                    try ws.writeMessage(@errorName(err), .text);
-                    continue;
-                };
-                try ws.writeMessage("Chain replaced", .text);
-            },
-            .connection_close => break,
-            else => continue,
-        }
+fn getPeers(allocator: std.mem.Allocator, env_map: *Environ.Map) ![]peer.Peer {
+    const peers_str = env_map.get("PEERS") orelse return allocator.alloc(peer.Peer, 0);
+    var it = std.mem.splitScalar(u8, peers_str, ',');
+    var list: std.ArrayList(peer.Peer) = .empty;
+    while (it.next()) |entry| {
+        const p = try peer.parse(allocator, entry);
+        try list.append(allocator, p);
     }
+    return list.toOwnedSlice(allocator);
 }
-
-fn blocks(ctx: volt.Context, state: *AppState) !volt.Response {
-    var writer = std.Io.Writer.Allocating.init(ctx.request_allocator);
-    try state.lock.lock(ctx.io);
-    defer state.lock.unlock(ctx.io);
-
-    try state.chain.json(&writer.writer);
-    const content = writer.written();
-    return .json(ctx.request_allocator, .ok, content, null);
-}
-
-fn mine(ctx: volt.Context, state: *AppState, mine_request: extractors.Json(MineRequest)) !volt.Response {
-    try state.lock.lock(ctx.io);
-    defer state.lock.unlock(ctx.io);
-
-    const payload = mine_request.value catch |err| {
-        if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and !isMemberOfErrorSet(std.mem.Allocator.Error, err)) {
-            return .text(ctx.request_allocator, .bad_request, @errorName(err), null);
-        }
-
-        return .text(ctx.request_allocator, .internal_server_error, @errorName(err), null);
-    };
-    try state.chain.add(ctx.io, ctx.server_allocator, payload.data);
-    return .ok(ctx.request_allocator, "Block mined successfully", null);
-}
-
-pub fn isMemberOfErrorSet(comptime T: type, err: anyerror) bool {
-    const info = @typeInfo(T);
-    if (info != .error_set) @compileError("T should be an error set");
-
-    const error_set = info.error_set orelse false;
-    inline for (error_set) |err_field| {
-        if (err == @field(T, err_field.name)) return true;
-    }
-
-    return false;
-}
-
-const MineRequest = struct {
-    data: []u8,
-};
-
-const BlockJson = struct {
-    prev_hash: []const u8,
-    hash: []const u8,
-    timestamp: i64,
-    nonce: u64,
-    data: []const u8,
-
-    pub fn toBlock(self: *const @This()) !core.Blockchain.Item {
-        var prev_hash: [core.DIGEST_SIZE]u8 = undefined;
-        var hash: [core.DIGEST_SIZE]u8 = undefined;
-
-        _ = try std.fmt.hexToBytes(&prev_hash, self.prev_hash);
-        _ = try std.fmt.hexToBytes(&hash, self.hash);
-
-        return .{
-            .prev_hash = prev_hash,
-            .hash = hash,
-            .timestamp = self.timestamp,
-            .nonce = self.nonce,
-            .data = self.data,
-        };
-    }
-};
