@@ -1,6 +1,6 @@
 const std = @import("std");
-const b = @import("block.zig");
 
+const b = @import("block.zig");
 pub const Block = b.Block;
 pub const Hash = b.Hash;
 

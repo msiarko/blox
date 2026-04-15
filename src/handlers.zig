@@ -1,11 +1,12 @@
 const std = @import("std");
+const WebSocket = std.http.Server.WebSocket;
+
 const core = @import("core");
 const volt = @import("volt");
-const AppState = @import("state.zig").AppState;
-const p2p = @import("p2p.zig");
-const p = @import("peer.zig");
 
-const WebSocket = std.http.Server.WebSocket;
+const AppState = @import("state.zig").AppState;
+const p = @import("peer.zig");
+const p2p = @import("p2p.zig");
 
 pub fn webSockets(ctx: volt.Context, state: *AppState, ws: volt.extract.WebSocket, peer_uri_header: volt.extract.Header("Blox-Peer-Uri")) !volt.Response {
     if (peer_uri_header.value) |peer_uri| {

@@ -1,6 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
+
 const core = @import("core");
+
 const Peer = @import("peer.zig").Peer;
 
 /// Maximum number of peers the node tracks simultaneously.

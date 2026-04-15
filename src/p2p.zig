@@ -3,10 +3,10 @@ const Io = std.Io;
 
 const core = @import("core");
 
+const Peer = @import("peer.zig").Peer;
 const state_mod = @import("state.zig");
 const AppState = state_mod.AppState;
 const MAX_PEERS_COUNT = state_mod.MAX_PEERS_COUNT;
-const Peer = @import("peer.zig").Peer;
 
 pub const ClientWebSocket = struct {
     const Self = @This();
