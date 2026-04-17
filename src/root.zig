@@ -27,25 +27,16 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, env_map: *Environ.Map) !voi
     const address: IpAddress = try .parse("127.0.0.1", http_port);
     const self_peer = try peer.initFromAddress(allocator, address);
 
-    // `server` is the single owner of `AppState` (including `chain` and `peers`). Do NOT keep
-    // a separate `state` variable after this — that would shallow-copy the `AppState` and alias
-    // `chain.blocks`'s backing buffer, causing a double free when either copy grows the ArrayList.
     var server: Server = try .init(allocator, io, try .init(allocator, self_peer, peers), .{});
-    // Must be deferred after `defer server.deinit()` so it runs first (LIFO order). Frees the
-    // chain's ArrayList and block data, the peers map, and the self-peer.
     defer server.state.deinit(io, allocator);
     defer server.deinit();
 
-    // `AppState.init` moved the `Peer` values out of the slice into its own heap-allocated
-    // entries; only the slice wrapper itself remains to be freed here.
     allocator.free(peers);
 
     try server.router.get("/ws", &handlers.webSockets);
     try server.router.get("/blocks", &handlers.blocks);
     try server.router.post("/mine", &handlers.mine);
 
-    // `&server.state` is the canonical AppState pointer — the same instance that Volt passes
-    // to HTTP handlers. All chain mutations go through this single pointer.
     var peer_connections = io.async(p2p.connectToPeers, .{ io, allocator, &server.state });
     defer peer_connections.cancel(io) catch {};
 

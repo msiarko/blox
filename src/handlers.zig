@@ -9,12 +9,12 @@ const p = @import("peer.zig");
 const p2p = @import("p2p.zig");
 
 pub fn webSockets(ctx: volt.Context, state: *AppState, ws: volt.extract.WebSocket, peer_uri_header: volt.extract.Header("Blox-Peer-Uri")) !volt.Response {
-    if (peer_uri_header.value) |peer_uri| {
-        try ws.onConnected(handleWebSocket, .{ ctx, state, peer_uri });
-        return volt.webSocketResponse(ws);
-    } else {
+    const peer_uri = peer_uri_header.value orelse {
         return .text(ctx.request_allocator, .bad_request, "Missing Blox-Peer-Uri header", null);
-    }
+    };
+
+    try ws.onConnected(handleWebSocket, .{ ctx, state, peer_uri });
+    return ws.intoResponse();
 }
 
 fn handleWebSocket(ctx: volt.Context, state: *AppState, peer_uri: []const u8, ws: *WebSocket) !void {
@@ -25,8 +25,6 @@ fn handleWebSocket(ctx: volt.Context, state: *AppState, peer_uri: []const u8, ws
         return err;
     };
 
-    // addPeer heap-allocates the Peer and returns a stable *Peer pointer.
-    // Ownership is transferred on success; we must NOT call peer.deinit after this.
     const peer_ptr = state.addPeer(ctx.io, ctx.server_allocator, peer_key, peer) catch |err| {
         peer.deinit(ctx.io, ctx.server_allocator);
         return err;
@@ -44,10 +42,6 @@ fn handleWebSocket(ctx: volt.Context, state: *AppState, peer_uri: []const u8, ws
         switch (msg.opcode) {
             .text => {
                 std.log.info("Received chain update from inbound peer {s}", .{peer_key});
-                // MUST use `server_allocator`, NOT `request_allocator`. This allocator is
-                // forwarded to `Blockchain.replace`, which uses it to grow the chain's ArrayList
-                // backing buffer and dup block data into the persistent chain. These allocations
-                // must outlive this WebSocket connection (and all future reconnects).
                 try p2p.applyChainUpdate(ctx.io, ctx.server_allocator, state, msg.data);
             },
             .connection_close => {
@@ -81,16 +75,14 @@ pub fn blocks(ctx: volt.Context, state: *AppState) !volt.Response {
 }
 
 pub fn mine(ctx: volt.Context, state: *AppState, mine_request: volt.extract.Json(MineRequest)) !volt.Response {
-    const payload = mine_request.value orelse {
-        if (mine_request.err) |err| {
-            if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and
-                !isMemberOfErrorSet(std.mem.Allocator.Error, err))
-            {
-                return .text(ctx.request_allocator, .bad_request, @errorName(err), null);
-            }
-            return .text(ctx.request_allocator, .internal_server_error, @errorName(err), null);
+    const payload = mine_request.result catch |err| {
+        if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and
+            !isMemberOfErrorSet(std.mem.Allocator.Error, err))
+        {
+            return .text(ctx.request_allocator, .bad_request, @errorName(err), null);
         }
-        return .internal_server_error(ctx.request_allocator, "", null);
+
+        return .text(ctx.request_allocator, .internal_server_error, @errorName(err), null);
     };
 
     // `server_allocator` required — the mined Block's `data` is appended to the

@@ -113,11 +113,6 @@ pub const ClientWebSocket = struct {
     }
 };
 
-/// Performs the HTTP/1.1 → WebSocket upgrade handshake on an existing TCP
-/// stream and returns a ready-to-use ClientWebSocket.
-/// A fresh random key is generated per call (one per connection).
-/// No heap allocation: the handshake request is written into a 512-byte
-/// stack buffer via bufPrint.
 pub fn connectWebSocket(
     io: Io,
     state: *AppState,
@@ -125,7 +120,6 @@ pub fn connectWebSocket(
     reader: *Io.net.Stream.Reader,
     writer: *Io.net.Stream.Writer,
 ) !ClientWebSocket {
-    // Generate a unique key for this connection (RFC 6455 §4.1).
     var key_bytes: [16]u8 = undefined;
     var rng = std.Random.DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMicroseconds()));
     rng.random().bytes(&key_bytes);
@@ -134,18 +128,13 @@ pub fn connectWebSocket(
 
     var host_buf: [128]u8 = undefined;
     const host_header = try peer.print(&host_buf);
-
-    // Send our own URI (with scheme) so the server can parse it with std.Uri.
     const blox_peer_uri = state.self_peer.uri_string;
-
-    // Use the URI path if one was provided, otherwise fall back to "/ws".
     const path_raw = switch (peer.uri.path) {
         .raw => |p| p,
         .percent_encoded => |p| p,
     };
     const path = if (path_raw.len == 0) "/ws" else path_raw;
 
-    // Stack buffer: typical handshake is ~200 bytes; 512 is a safe ceiling.
     var handshake_buf: [512]u8 = undefined;
     const handshake = try std.fmt.bufPrint(
         &handshake_buf,
@@ -206,11 +195,6 @@ pub fn applyChainUpdate(
     state: *AppState,
     json: []const u8,
 ) !void {
-    // IMPORTANT: `allocator` must be the server (long-lived) allocator.
-    // It is forwarded to `Blockchain.replace`, which uses it for persistent
-    // chain storage (ArrayList backing buffer + block data dups). Passing a
-    // request-scoped arena will free those allocations when the request ends,
-    // corrupting the chain.
     const parsed = std.json.parseFromSlice([]const BlockJson, allocator, json, .{}) catch |err| {
         if (err == error.OutOfMemory) return err;
         std.log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
@@ -218,14 +202,8 @@ pub fn applyChainUpdate(
     };
     defer parsed.deinit();
 
-    // Build the Blockchain's block list in one allocation (initCapacity),
-    // appending directly without the intermediate parsed_blocks array and
-    // without the second ArrayList that Blockchain.fromSlice would allocate.
     var blocks = try std.ArrayList(core.Block).initCapacity(allocator, parsed.value.len);
 
-    // Ownership-transfer flag: set to `true` once the ArrayList is moved into
-    // `new_chain`, so that the defer below does not double-free the blocks
-    // after ownership has been transferred.
     var blocks_owned = false;
     defer if (!blocks_owned) {
         for (blocks.items) |*b| b.deinit(allocator);
@@ -237,13 +215,7 @@ pub fn applyChainUpdate(
             std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
             return; // defer above handles cleanup
         };
-        // `b.data` points into `parsed`'s JSON buffer, which is freed by
-        // `defer parsed.deinit()` at the end of this function. This dup makes
-        // the data outlive `parsed`. The dup lives in `new_chain` and is freed
-        // by `new_chain.deinit` — a second dup into the persistent chain is
-        // made inside `Blockchain.replace`.
         const owned_data = try allocator.dupe(u8, b.data);
-        // appendAssumeCapacity never fails: we pre-allocated exactly parsed.value.len.
         blocks.appendAssumeCapacity(.{
             .timestamp = b.timestamp,
             .prev_hash = b.prev_hash,
@@ -253,15 +225,8 @@ pub fn applyChainUpdate(
         });
     }
 
-    // Transfer ownership directly into Blockchain, bypassing fromSlice's
-    // second ArrayList allocation.
     var new_chain: core.Blockchain = .{ .blocks = blocks };
-    // Ownership of the ArrayList (and the duped block data inside it) is
-    // transferred to `new_chain` here; the defer above must no longer free it.
     blocks_owned = true;
-    // `new_chain` is temporary. Its blocks (the first dup of each block's
-    // `data`) are freed here via deinit. The persistent chain already holds
-    // its own second dup of each block's data (made inside `Blockchain.replace`).
     defer new_chain.deinit(allocator);
 
     state.replaceChain(io, allocator, &new_chain) catch |err| {
@@ -291,9 +256,6 @@ pub fn connectToPeers(
     var connections: Io.Group = .init;
     defer connections.cancel(io);
 
-    // Snapshot peer pointers into a stack array while holding the lock.
-    // *Peer values are heap-allocated (stable), so these pointers remain
-    // valid after the lock is released even if the hashmap is later resized.
     var peer_buf: [MAX_PEERS_COUNT]*Peer = undefined;
     var peer_count: usize = 0;
     {
@@ -343,11 +305,7 @@ fn subscribeChainUpdates(
             break :blk true;
         };
 
-        // After a graceful disconnect the peer is reachable, so reset the
-        // backoff so the next reconnect attempt stays fast.  Keep the growing
-        // delay only for sessions that fail immediately (e.g. refused connection).
         if (session_ok) delay_ms = 1_000;
-
         Io.sleep(io, Io.Duration.fromMilliseconds(delay_ms), .real) catch return error.Canceled;
         delay_ms = @min(delay_ms * 2, 30_000);
     }
@@ -375,10 +333,6 @@ fn runPeerSession(
 
     var ws = try connectWebSocket(io, state, peer, &reader, &writer);
 
-    // Drain any stale chain snapshots that accumulated in the peer's queue
-    // while the connection was down.  queue.get(..., 0) is guaranteed to
-    // return immediately without blocking (min=0), giving us every item
-    // currently buffered so we can free them before the broadcast task starts.
     {
         var drain_buf: [1][]const u8 = undefined;
         const drained = peer.message_queue.get(io, &drain_buf, 0) catch 0;
@@ -388,8 +342,6 @@ fn runPeerSession(
     var broadcast_task = io.async(broadcastClientChainUpdates, .{ io, allocator, &peer.message_queue, &ws });
     defer broadcast_task.cancel(io) catch {};
 
-    // Push our current chain immediately so the peer syncs on every (re)connect.
-    // Because the queue was just drained, the broadcast task picks this up first.
     try state.sendChainToPeer(io, allocator, peer);
 
     const msg_buf = try allocator.alloc(u8, 1024 * 1024);

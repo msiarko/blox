@@ -18,9 +18,6 @@ const GENESIS_HASH = hashData(
     options.GENESIS_DATA,
 );
 
-// Comptime constant — every field, including `data`, is baked into the binary as a
-// string literal sourced from `options.GENESIS_DATA`. `data` is NOT heap-allocated
-// and must never be passed to `allocator.free`.
 pub const GENESIS: Block = .{
     .timestamp = options.GENESIS_TIMESTAMP,
     .prev_hash = ZERO_HASH,

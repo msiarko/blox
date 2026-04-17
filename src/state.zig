@@ -5,9 +5,6 @@ const core = @import("core");
 
 const Peer = @import("peer.zig").Peer;
 
-/// Maximum number of peers the node tracks simultaneously.
-/// Used to size stack arrays in broadcastChain and connectToPeers,
-/// avoiding heap allocations for the common case.
 pub const MAX_PEERS_COUNT: usize = 64;
 
 pub const AppState = struct {
@@ -15,8 +12,6 @@ pub const AppState = struct {
 
     lock: std.Io.Mutex,
     chain: core.Blockchain,
-    /// Peers are heap-allocated (*Peer) so their address (and the address of
-    /// their message_queue) stays stable across hashmap resizes.
     peers: std.StringHashMap(*Peer),
     self_peer: Peer,
 
@@ -28,14 +23,6 @@ pub const AppState = struct {
             .self_peer = self_peer,
         };
         errdefer self.chain.deinit(allocator);
-        // The HashMap owns heap-duped string keys (`allocator.dupe`) and heap-allocated
-        // `*Peer` values (`allocator.create`). If init fails partway these must be freed
-        // manually — `Peer.deinit` requires `Io`, which is unavailable here, so the
-        // backing allocations are released directly instead.
-        // Free any peers already inserted into the map on error.
-        // We can't call Peer.deinit (needs Io) here, so we free the backing
-        // allocations manually – no async tasks are running during init so the
-        // queue has no waiters and its buffer just needs to be released.
         errdefer {
             var it = self.peers.iterator();
             while (it.next()) |entry| {
@@ -86,10 +73,6 @@ pub const AppState = struct {
         try self.chain.json(writer);
     }
 
-    /// Heap-allocates `peer` and inserts it into the peers map.
-    /// Returns a stable *Peer pointer valid until removePeer or deinit.
-    /// The caller must NOT call peer.deinit() after a successful call –
-    /// ownership is transferred.
     pub fn addPeer(
         self: *Self,
         io: Io,
@@ -126,8 +109,6 @@ pub const AppState = struct {
         }
     }
 
-    /// Serialises the current chain and enqueues it directly into one peer's
-    /// message queue so the peer syncs on every (re)connect.
     pub fn sendChainToPeer(self: *Self, io: Io, allocator: std.mem.Allocator, peer: *Peer) !void {
         var allocating = std.Io.Writer.Allocating.init(allocator);
         defer allocating.deinit();
@@ -142,7 +123,6 @@ pub const AppState = struct {
         const msg = try allocator.dupe(u8, json);
         errdefer allocator.free(msg);
 
-        // Discard any pending snapshot — only the latest state matters.
         var old: [1][]const u8 = undefined;
         const n = peer.message_queue.get(io, &old, 0) catch 0;
         for (old[0..n]) |stale| allocator.free(stale);
@@ -152,9 +132,6 @@ pub const AppState = struct {
 
     pub fn addBlock(self: *Self, io: Io, allocator: std.mem.Allocator, data: []const u8) !void {
         const last_hash = blk: {
-            // Lock is acquired only to read `last_hash`, then released (via defer)
-            // before Block.init (proof-of-work mining) so other requests aren't blocked.
-            // `last_hash` is a [32]u8 value copy — safe to use after the lock is dropped.
             try self.lock.lock(io);
             defer self.lock.unlock(io);
             break :blk try self.chain.getLastHash();
@@ -162,9 +139,6 @@ pub const AppState = struct {
 
         const new_item = try core.Block.init(io, allocator, &last_hash, data);
 
-        // `allocator` MUST be the server (long-lived) allocator: `chain.add` appends
-        // the mined block's `data` and may grow the ArrayList backing buffer — both
-        // allocations must outlive this request.
         try self.lock.lock(io);
         defer self.lock.unlock(io);
         return self.chain.add(allocator, new_item);
@@ -173,10 +147,6 @@ pub const AppState = struct {
     pub fn replaceChain(self: *Self, io: Io, allocator: std.mem.Allocator, chain: *const core.Blockchain) !void {
         try self.lock.lock(io);
         defer self.lock.unlock(io);
-        // `allocator` MUST be the server (long-lived) allocator. It is forwarded to
-        // `Blockchain.replace`, which uses it to grow the ArrayList backing buffer and
-        // dup block data into the persistent chain. Passing a request-scoped arena will
-        // corrupt the chain when the arena is freed.
         return self.chain.replace(allocator, chain);
     }
 
@@ -184,8 +154,6 @@ pub const AppState = struct {
         var allocating = std.Io.Writer.Allocating.init(allocator);
         defer allocating.deinit();
 
-        // Collect queue pointers into a stack array — no heap allocation needed.
-        // 64 slots covers any realistic peer count; excess peers are skipped with a warning.
         var queue_buf: [MAX_PEERS_COUNT]*Io.Queue([]const u8) = undefined;
         var queue_count: usize = 0;
 
@@ -207,7 +175,6 @@ pub const AppState = struct {
 
         const json = allocating.written();
         for (queue_buf[0..queue_count]) |queue| {
-            // Discard any pending snapshot — only the latest state matters.
             var old: [1][]const u8 = undefined;
             const n = queue.get(io, &old, 0) catch 0;
             for (old[0..n]) |stale| allocator.free(stale);
