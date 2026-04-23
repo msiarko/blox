@@ -1,12 +1,11 @@
 const std = @import("std");
 const Io = std.Io;
 
-const core = @import("core");
+const Blockchain = @import("Blockchain.zig");
+const Block = @import("Block.zig");
 
 const Peer = @import("peer.zig").Peer;
-const state_mod = @import("state.zig");
-const AppState = state_mod.AppState;
-const MAX_PEERS_COUNT = state_mod.MAX_PEERS_COUNT;
+const AppState = @import("routes.zig").AppState;
 
 pub const ClientWebSocket = struct {
     const Self = @This();
@@ -115,7 +114,7 @@ pub const ClientWebSocket = struct {
 
 pub fn connectWebSocket(
     io: Io,
-    state: *AppState,
+    state: AppState,
     peer: *Peer,
     reader: *Io.net.Stream.Reader,
     writer: *Io.net.Stream.Writer,
@@ -172,9 +171,9 @@ pub const BlockJson = struct {
     nonce: u64,
     data: []const u8,
 
-    pub fn toBlock(self: *const BlockJson) !core.Block {
-        var prev_hash: core.Hash = undefined;
-        var hash: core.Hash = undefined;
+    pub fn toBlock(self: *const BlockJson) !Block {
+        var prev_hash: Block.Hash = undefined;
+        var hash: Block.Hash = undefined;
 
         _ = try std.fmt.hexToBytes(&prev_hash, self.prev_hash);
         _ = try std.fmt.hexToBytes(&hash, self.hash);
@@ -189,10 +188,10 @@ pub const BlockJson = struct {
     }
 };
 
-pub fn applyChainUpdate(
+pub fn update(
     io: Io,
     allocator: std.mem.Allocator,
-    state: *AppState,
+    state: AppState,
     json: []const u8,
 ) !void {
     const parsed = std.json.parseFromSlice([]const BlockJson, allocator, json, .{}) catch |err| {
@@ -202,7 +201,7 @@ pub fn applyChainUpdate(
     };
     defer parsed.deinit();
 
-    var blocks = try std.ArrayList(core.Block).initCapacity(allocator, parsed.value.len);
+    var blocks = try std.ArrayList(Block).initCapacity(allocator, parsed.value.len);
 
     var blocks_owned = false;
     defer if (!blocks_owned) {
@@ -225,11 +224,11 @@ pub fn applyChainUpdate(
         });
     }
 
-    var new_chain: core.Blockchain = .{ .blocks = blocks };
+    var new_chain: Blockchain = .{ .blocks = blocks };
     blocks_owned = true;
     defer new_chain.deinit(allocator);
 
-    state.replaceChain(io, allocator, &new_chain) catch |err| {
+    state.replace(io, &new_chain) catch |err| {
         if (err == error.OutOfMemory) return err;
         std.log.info("Did not replace chain ({s})", .{@errorName(err)});
         return;
@@ -248,49 +247,37 @@ pub fn sendToPeer(
     try peer.message_queue.putOne(io, copy);
 }
 
-pub fn connectToPeers(
+pub fn connectAll(
     io: Io,
     allocator: std.mem.Allocator,
-    state: *AppState,
+    state: AppState,
 ) !void {
-    var connections: Io.Group = .init;
-    defer connections.cancel(io);
+    var peer_connections: Io.Group = .init;
+    defer peer_connections.cancel(io);
 
-    var peer_buf: [MAX_PEERS_COUNT]*Peer = undefined;
-    var peer_count: usize = 0;
     {
         try state.lock.lock(io);
         defer state.lock.unlock(io);
         var it = state.peers.valueIterator();
         while (it.next()) |ptr| {
-            if (peer_count < peer_buf.len) {
-                peer_buf[peer_count] = ptr.*;
-                peer_count += 1;
-            } else {
-                std.log.warn("connectToPeers: peer count exceeds max_peers ({d}), extra peers skipped", .{MAX_PEERS_COUNT});
-                break;
-            }
+            peer_connections.async(io, connect, .{ io, allocator, state, ptr.* });
         }
     }
 
-    for (peer_buf[0..peer_count]) |peer_ptr| {
-        connections.async(io, subscribeChainUpdates, .{ io, allocator, state, peer_ptr });
-    }
-
-    try state.broadcastChain(io, allocator);
-    return connections.await(io);
+    try state.broadcast(io);
+    return peer_connections.await(io);
 }
 
-fn subscribeChainUpdates(
+fn connect(
     io: Io,
     allocator: std.mem.Allocator,
-    state: *AppState,
+    state: AppState,
     peer: *Peer,
 ) Io.Cancelable!void {
     var delay_ms: i64 = 1_000;
     while (true) {
         const session_ok = blk: {
-            runPeerSession(io, allocator, state, peer) catch |err| switch (err) {
+            startPeerSession(io, allocator, state, peer) catch |err| switch (err) {
                 error.OutOfMemory, error.Canceled => return error.Canceled,
                 else => {
                     const host = peer.getHost() catch return error.Canceled;
@@ -311,10 +298,10 @@ fn subscribeChainUpdates(
     }
 }
 
-fn runPeerSession(
+fn startPeerSession(
     io: Io,
     allocator: std.mem.Allocator,
-    state: *AppState,
+    state: AppState,
     peer: *Peer,
 ) !void {
     const address = try peer.getAddress();
@@ -338,11 +325,12 @@ fn runPeerSession(
         const drained = peer.message_queue.get(io, &drain_buf, 0) catch 0;
         for (drain_buf[0..drained]) |stale| allocator.free(stale);
     }
+    defer ws.flush() catch {};
 
-    var broadcast_task = io.async(broadcastClientChainUpdates, .{ io, allocator, &peer.message_queue, &ws });
-    defer broadcast_task.cancel(io) catch {};
+    var publish_task = io.async(publish, .{ io, allocator, &peer.message_queue, &ws });
+    defer publish_task.cancel(io) catch {};
 
-    try state.sendChainToPeer(io, allocator, peer);
+    try state.send(io, peer);
 
     const msg_buf = try allocator.alloc(u8, 1024 * 1024);
     defer allocator.free(msg_buf);
@@ -354,7 +342,7 @@ fn runPeerSession(
                 var buf: [128]u8 = undefined;
                 const peer_key = peer.print(&buf) catch "unknown";
                 std.log.info("Received chain update from peer {s}", .{peer_key});
-                try applyChainUpdate(io, allocator, state, msg.data);
+                try update(io, allocator, state, msg.data);
             },
             .connection_close => {
                 var buf: [128]u8 = undefined;
@@ -367,16 +355,16 @@ fn runPeerSession(
     }
 }
 
-fn broadcastClientChainUpdates(
+fn publish(
     io: Io,
     allocator: std.mem.Allocator,
     updates_queue: *Io.Queue([]const u8),
     ws: *ClientWebSocket,
 ) !void {
     while (true) {
-        const update = try updates_queue.getOne(io);
-        defer allocator.free(update);
-        try ws.writeMessage(update, .text);
+        const msg = try updates_queue.getOne(io);
+        defer allocator.free(msg);
+        try ws.writeMessage(msg, .text);
         try ws.flush();
     }
 }

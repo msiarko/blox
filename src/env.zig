@@ -1,12 +1,21 @@
 const std = @import("std");
 const Map = std.process.Environ.Map;
 const Dir = std.Io.Dir;
+const builtin = @import("builtin");
+const env = @import("options").env;
+const FileOpenError = std.Io.File.OpenError;
 
-pub fn setupEnv(io: std.Io, allocator: std.mem.Allocator, env: *Map) !void {
+pub fn load(io: std.Io, allocator: std.mem.Allocator, env_map: *Map) !void {
     var buffer: [1024]u8 = undefined;
-    const content = Dir.cwd().readFile(io, ".env", &buffer) catch |err| {
-        std.log.warn("Failed to read .env file: {}\n", .{err});
-        return;
+
+    const env_filename = @tagName(env) ++ ".env";
+    const content = Dir.cwd().readFile(io, env_filename, &buffer) catch |err| {
+        const message = try std.fmt.allocPrint(
+            allocator,
+            "Failed to read {s} file: {s}\n",
+            .{ env_filename, @errorName(err) },
+        );
+        @panic(message);
     };
 
     var split = std.mem.splitScalar(u8, content, '\n');
@@ -32,6 +41,6 @@ pub fn setupEnv(io: std.Io, allocator: std.mem.Allocator, env: *Map) !void {
         const owned_value = try allocator.dupe(u8, value);
         errdefer allocator.free(owned_value);
 
-        try env.put(owned_key, owned_value);
+        try env_map.put(owned_key, owned_value);
     }
 }

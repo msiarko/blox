@@ -4,19 +4,17 @@ const IpAddress = std.Io.net.IpAddress;
 
 const volt = @import("volt");
 
-const AppState = @import("state.zig").AppState;
+const State = @import("State.zig");
 const env = @import("env.zig");
-const handlers = @import("handlers.zig");
+const routes = @import("routes.zig");
 const p2p = @import("p2p.zig");
 const peer = @import("peer.zig");
-
-const Server = volt.Server(AppState);
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, env_map: *Environ.Map) !void {
     var env_arena = std.heap.ArenaAllocator.init(allocator);
     defer env_arena.deinit();
 
-    try env.setupEnv(io, env_arena.allocator(), env_map);
+    try env.load(io, env_arena.allocator(), env_map);
 
     const peers = try getPeers(allocator, env_map);
     const http_port = blk: {
@@ -26,21 +24,20 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, env_map: *Environ.Map) !voi
 
     const address: IpAddress = try .parse("127.0.0.1", http_port);
     const self_peer = try peer.initFromAddress(allocator, address);
+    var server: volt.Server = try .init(io, .{});
 
-    var server: Server = try .init(allocator, io, try .init(allocator, self_peer, peers), .{});
-    defer server.state.deinit(io, allocator);
-    defer server.deinit();
+    var state: State = try .init(allocator, self_peer, peers);
+    defer state.deinit(io);
 
     allocator.free(peers);
 
-    try server.router.get("/ws", &handlers.webSockets);
-    try server.router.get("/blocks", &handlers.blocks);
-    try server.router.post("/mine", &handlers.mine);
-
-    var peer_connections = io.async(p2p.connectToPeers, .{ io, allocator, &server.state });
+    var peer_connections = io.async(p2p.connectAll, .{ io, allocator, &state });
     defer peer_connections.cancel(io) catch {};
 
-    try server.listen(address);
+    var router = try routes.router(allocator, &state);
+    defer router.deinit(allocator);
+
+    try server.listen(routes.AppState, allocator, address, &router);
 }
 
 fn getPeers(allocator: std.mem.Allocator, env_map: *Environ.Map) ![]peer.Peer {
