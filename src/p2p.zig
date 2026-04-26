@@ -70,6 +70,58 @@ pub const ClientWebSocket = struct {
         }
     }
 
+    pub fn connect(
+        io: Io,
+        state: AppState,
+        peer: *Peer,
+        reader: *Io.net.Stream.Reader,
+        writer: *Io.net.Stream.Writer,
+    ) !Self {
+        var key_bytes: [16]u8 = undefined;
+        var rng = std.Random.DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMicroseconds()));
+        rng.random().bytes(&key_bytes);
+        var key_buf: [std.base64.standard.Encoder.calcSize(16)]u8 = undefined;
+        const key = std.base64.standard.Encoder.encode(&key_buf, &key_bytes);
+
+        var host_buf: [128]u8 = undefined;
+        const host_header = try peer.print(&host_buf);
+        const blox_peer_uri = state.self_peer.uri_string;
+        const path_raw = switch (peer.uri.path) {
+            .raw => |p| p,
+            .percent_encoded => |p| p,
+        };
+        const path = if (path_raw.len == 0) "/ws" else path_raw;
+
+        var handshake_buf: [512]u8 = undefined;
+        const handshake = try std.fmt.bufPrint(
+            &handshake_buf,
+            "GET {s} HTTP/1.1\r\n" ++
+                "Host: {s}\r\n" ++
+                "Upgrade: websocket\r\n" ++
+                "Connection: Upgrade\r\n" ++
+                "Sec-WebSocket-Key: {s}\r\n" ++
+                "Sec-WebSocket-Version: 13\r\n" ++
+                "Blox-Peer-Uri: {s}\r\n\r\n",
+            .{ path, host_header, key, blox_peer_uri },
+        );
+
+        try writer.interface.writeAll(handshake);
+        try writer.interface.flush();
+
+        var got101 = false;
+        while (true) {
+            const line = try reader.interface.takeDelimiter('\n');
+            if (line) |l| {
+                const trimmed = std.mem.trim(u8, l, " \r\n");
+                if (trimmed.len == 0) break;
+                if (std.mem.startsWith(u8, trimmed, "HTTP/1.1 101")) got101 = true;
+            } else break;
+        }
+        if (!got101) return error.WebSocketUpgradeFailed;
+
+        return .init(io, &reader.interface, &writer.interface);
+    }
+
     pub fn flush(self: *Self) !void {
         try self.output.flush();
     }
@@ -111,58 +163,6 @@ pub const ClientWebSocket = struct {
         try self.input.streamExact(&writer, buf.len);
     }
 };
-
-pub fn connectWebSocket(
-    io: Io,
-    state: AppState,
-    peer: *Peer,
-    reader: *Io.net.Stream.Reader,
-    writer: *Io.net.Stream.Writer,
-) !ClientWebSocket {
-    var key_bytes: [16]u8 = undefined;
-    var rng = std.Random.DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMicroseconds()));
-    rng.random().bytes(&key_bytes);
-    var key_buf: [std.base64.standard.Encoder.calcSize(16)]u8 = undefined;
-    const key = std.base64.standard.Encoder.encode(&key_buf, &key_bytes);
-
-    var host_buf: [128]u8 = undefined;
-    const host_header = try peer.print(&host_buf);
-    const blox_peer_uri = state.self_peer.uri_string;
-    const path_raw = switch (peer.uri.path) {
-        .raw => |p| p,
-        .percent_encoded => |p| p,
-    };
-    const path = if (path_raw.len == 0) "/ws" else path_raw;
-
-    var handshake_buf: [512]u8 = undefined;
-    const handshake = try std.fmt.bufPrint(
-        &handshake_buf,
-        "GET {s} HTTP/1.1\r\n" ++
-            "Host: {s}\r\n" ++
-            "Upgrade: websocket\r\n" ++
-            "Connection: Upgrade\r\n" ++
-            "Sec-WebSocket-Key: {s}\r\n" ++
-            "Sec-WebSocket-Version: 13\r\n" ++
-            "Blox-Peer-Uri: {s}\r\n\r\n",
-        .{ path, host_header, key, blox_peer_uri },
-    );
-
-    try writer.interface.writeAll(handshake);
-    try writer.interface.flush();
-
-    var got101 = false;
-    while (true) {
-        const line = try reader.interface.takeDelimiter('\n');
-        if (line) |l| {
-            const trimmed = std.mem.trim(u8, l, " \r\n");
-            if (trimmed.len == 0) break;
-            if (std.mem.startsWith(u8, trimmed, "HTTP/1.1 101")) got101 = true;
-        } else break;
-    }
-    if (!got101) return error.WebSocketUpgradeFailed;
-
-    return .init(io, &reader.interface, &writer.interface);
-}
 
 pub const BlockJson = struct {
     prev_hash: []const u8,
@@ -236,22 +236,15 @@ pub fn update(
     std.log.info("Chain replaced from peer update", .{});
 }
 
-pub fn sendToPeer(
-    io: Io,
-    allocator: std.mem.Allocator,
-    peer: *Peer,
-    msg: []const u8,
-) !void {
-    const copy = try allocator.dupe(u8, msg);
-    errdefer allocator.free(copy);
-    try peer.message_queue.putOne(io, copy);
-}
-
 pub fn connectAll(
     io: Io,
     allocator: std.mem.Allocator,
     state: AppState,
 ) !void {
+    if (state.peers.count() == 0) {
+        return;
+    }
+
     var peer_connections: Io.Group = .init;
     defer peer_connections.cancel(io);
 
@@ -318,7 +311,7 @@ fn startPeerSession(
     var read_buf: [4096]u8 = undefined;
     var reader = stream.reader(io, &read_buf);
 
-    var ws = try connectWebSocket(io, state, peer, &reader, &writer);
+    var ws = try ClientWebSocket.connect(io, state, peer, &reader, &writer);
 
     {
         var drain_buf: [1][]const u8 = undefined;

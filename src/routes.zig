@@ -47,8 +47,8 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     defer state.removePeer(ctx.io, peer_key) catch {};
 
     // peer_ptr is heap-allocated (*Peer) – stable across any future hashmap resizes.
-    var broadcast_task = ctx.io.async(broadcastChainUpdates, .{ ctx.io, state.allocator, &peer_ptr.message_queue, &ws });
-    defer broadcast_task.cancel(ctx.io) catch {};
+    var sub_task = ctx.io.async(subscribe, .{ ctx.io, state.allocator, &peer_ptr.message_queue, &ws });
+    defer sub_task.cancel(ctx.io) catch {};
 
     try state.broadcast(ctx.io);
 
@@ -72,7 +72,7 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     return .empty;
 }
 
-fn broadcastChainUpdates(
+fn subscribe(
     io: std.Io,
     allocator: std.mem.Allocator,
     peer_queue: *std.Io.Queue([]const u8),

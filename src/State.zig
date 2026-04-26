@@ -150,6 +150,10 @@ pub fn replace(self: *Self, io: Io, chain: *const Blockchain) !void {
 }
 
 pub fn broadcast(self: *Self, io: Io) !void {
+    if (self.peers.count() == 0) {
+        return;
+    }
+
     var allocating = std.Io.Writer.Allocating.init(self.allocator);
     defer allocating.deinit();
 
