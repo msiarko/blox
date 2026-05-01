@@ -1,4 +1,5 @@
 const std = @import("std");
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 const Env = enum {
     dev,
@@ -23,10 +24,11 @@ pub fn build(b: *std.Build) void {
     mod.addImport("volt", volt.module("volt"));
 
     const options = b.addOptions();
-    options.addOption(u8, "DIFFICULTY", 2);
-    options.addOption([]const u8, "GENESIS_DATA", "GENESIS");
-    options.addOption(i64, "GENESIS_TIMESTAMP", 199204);
-    options.addOption(u64, "GENESIS_NONCE", 3349);
+    options.addOption(u4, "genesis_difficulty", 2);
+    options.addOption([Sha256.digest_length]u8, "genesis_prev_hash", [_]u8{0} ** Sha256.digest_length);
+    options.addOption([]const u8, "genesis_data", "GENESIS");
+    options.addOption(i64, "genesis_timestamp", 199204);
+    options.addOption(u64, "genesis_nonce", 3349);
     options.addOption(Env, "env", env);
     mod.addOptions("options", options);
 

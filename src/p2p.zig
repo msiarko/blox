@@ -4,7 +4,7 @@ const Io = std.Io;
 const Blockchain = @import("Blockchain.zig");
 const Block = @import("Block.zig");
 
-const Peer = @import("peer.zig").Peer;
+const Peer = @import("Peer.zig");
 const AppState = @import("routes.zig").AppState;
 
 pub const ClientWebSocket = struct {
@@ -85,7 +85,11 @@ pub const ClientWebSocket = struct {
 
         var host_buf: [128]u8 = undefined;
         const host_header = try peer.print(&host_buf);
-        const blox_peer_uri = state.self_peer.uri_string;
+
+        var uri_buf: [128]u8 = undefined;
+        var fixed_writer = Io.Writer.fixed(&uri_buf);
+        try state.self_peer.uri.format(&fixed_writer);
+        const blox_peer_uri = fixed_writer.buffered();
         const path_raw = switch (peer.uri.path) {
             .raw => |p| p,
             .percent_encoded => |p| p,
@@ -169,6 +173,7 @@ pub const BlockJson = struct {
     hash: []const u8,
     timestamp: i64,
     nonce: u64,
+    difficulty: u4,
     data: []const u8,
 
     pub fn toBlock(self: *const BlockJson) !Block {
@@ -183,6 +188,7 @@ pub const BlockJson = struct {
             .hash = hash,
             .timestamp = self.timestamp,
             .nonce = self.nonce,
+            .difficulty = self.difficulty,
             .data = self.data,
         };
     }
@@ -220,6 +226,7 @@ pub fn update(
             .prev_hash = b.prev_hash,
             .hash = b.hash,
             .nonce = b.nonce,
+            .difficulty = b.difficulty,
             .data = owned_data,
         });
     }

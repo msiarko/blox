@@ -12,46 +12,36 @@ const Self = @This();
 blocks: std.ArrayList(Block),
 
 pub fn init(allocator: std.mem.Allocator) !Self {
-    var blocks: std.ArrayList(Block) = .empty;
-    // GENESIS is copied by value into the ArrayList. Its `data` field points at a
-    // comptime string literal (not a heap allocation). `Block.deinit` detects this
-    // via the hash guard and skips the free, so it is safe to deinit like any other block.
-    try blocks.append(allocator, Block.GENESIS);
+    var blocks: std.ArrayList(Block) = try .initCapacity(allocator, 8);
+    const genesis = try Block.genesis(allocator);
+    try blocks.append(allocator, genesis);
     return .{ .blocks = blocks };
 }
 
 pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-    // Safe to call `deinit` on every block including genesis: `Block.deinit`
-    // uses a hash guard to skip `allocator.free` for the genesis block's comptime `data`.
     for (self.blocks.items) |*block| {
         block.deinit(allocator);
     }
 
-    // `allocator` must be the same allocator used in every prior `append` / `replace`
-    // call that grew this ArrayList. Mixing allocators here is undefined behaviour.
     self.blocks.deinit(allocator);
+    self.* = undefined;
 }
 
-pub fn add(self: *Self, allocator: std.mem.Allocator, item: Block) !void {
+pub fn add(self: *Self, io: std.Io, allocator: std.mem.Allocator, data: []const u8) !void {
+    const prev_block = try self.getLastBlock();
+    const block = try Block.init(io, allocator, prev_block, data);
+    try self.blocks.append(allocator, block);
+}
+
+pub fn getLastBlock(self: *const Self) !*const Block {
     if (self.blocks.items.len == 0)
         return error.BlockchainEmpty;
 
-    const prev_block = &self.blocks.items[self.blocks.items.len - 1];
-    if (!std.mem.eql(u8, &item.prev_hash, &prev_block.hash))
-        return error.InvalidPreviousHash;
-
-    // `item` is moved by value into the ArrayList; ownership of `item.data` transfers
-    // here. The caller must have heap-allocated `item.data` with this same `allocator`
-    // so that `deinit` can free it correctly.
-    try self.blocks.append(allocator, item);
+    return &self.blocks.items[self.blocks.items.len - 1];
 }
 
 fn isValid(self: *const Self) bool {
     if (self.blocks.items.len == 0) return false;
-
-    const genesis = &self.blocks.items[0];
-    if (!genesis.eql(&Block.GENESIS)) return false;
-
     for (1..self.blocks.items.len) |i| {
         const curr = &self.blocks.items[i];
         const prev = &self.blocks.items[i - 1];
@@ -63,6 +53,9 @@ fn isValid(self: *const Self) bool {
 }
 
 pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Block) !Self {
+    if (slice.len == 0)
+        return error.SliceIsEmpty;
+
     var blocks: std.ArrayList(Block) = .empty;
     for (slice) |item| {
         try blocks.append(allocator, .{
@@ -70,6 +63,7 @@ pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Block) !Self {
             .prev_hash = item.prev_hash,
             .hash = item.hash,
             .nonce = item.nonce,
+            .difficulty = item.difficulty,
             // Each block's `data` is duped into a fresh heap allocation owned by the
             // returned `Blockchain`. The caller is responsible for calling `deinit`.
             .data = try allocator.dupe(u8, item.data),
@@ -79,19 +73,14 @@ pub fn fromSlice(allocator: std.mem.Allocator, slice: []const Block) !Self {
     return .{ .blocks = blocks };
 }
 
-pub fn getLastHash(self: *const Self) !Hash {
-    if (self.blocks.items.len == 0) return error.BlockchainEmpty;
-    return self.blocks.items[self.blocks.items.len - 1].hash;
-}
-
 pub fn replace(self: *Self, allocator: std.mem.Allocator, chain: *const Self) !void {
     if (self.blocks.items.len >= chain.blocks.items.len) return error.ChainLengthIsEqualOrLess;
     if (!chain.isValid()) return error.InvalidChain;
+    for (self.blocks.items, 0..) |*item, i| {
+        if (!item.eql(&chain.blocks.items[i]))
+            return error.InvalidChain;
+    }
 
-    // IMPORTANT: `allocator` must have the same (or longer) lifetime as `self`.
-    // It is used to (1) grow `self.blocks`'s backing buffer and (2) dup each incoming
-    // block's `data` into the persistent chain. Using a request-scoped arena here will
-    // corrupt the chain when the arena is freed.
     for (self.blocks.items.len..chain.blocks.items.len) |i| {
         const block = &chain.blocks.items[i];
         try self.blocks.append(allocator, .{
@@ -99,6 +88,7 @@ pub fn replace(self: *Self, allocator: std.mem.Allocator, chain: *const Self) !v
             .prev_hash = block.prev_hash,
             .hash = block.hash,
             .nonce = block.nonce,
+            .difficulty = block.difficulty,
             .data = try allocator.dupe(u8, block.data),
         });
     }
@@ -114,12 +104,15 @@ pub fn printJson(self: *const Self, writer: *std.Io.Writer) !void {
 
 test "blockchain starts with genesis block" {
     const allocator = std.testing.allocator;
+    var genesis_block = try Block.genesis(allocator);
+    defer genesis_block.deinit(allocator);
+
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
     const first_block = &blockchain.blocks.items[0];
 
-    try std.testing.expect(std.meta.eql(Block.GENESIS, first_block.*));
+    try std.testing.expect(genesis_block.eql(first_block));
 }
 
 test "blockchain adds new block" {
@@ -128,13 +121,10 @@ test "blockchain adds new block" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    const prev_hash = try blockchain.getLastHash();
-    const block: Block = try .init(io, allocator, &prev_hash, "some data");
+    try blockchain.add(io, allocator, "some data");
 
-    try blockchain.add(allocator, block);
-
-    const last_block = &blockchain.blocks.items[blockchain.blocks.items.len - 1];
-    try std.testing.expectEqualSlices(u8, block.data, last_block.data);
+    const last_block = try blockchain.getLastBlock();
+    try std.testing.expectEqualSlices(u8, "some data", last_block.data);
 }
 
 test "blockchain is valid if no data corrupted" {
@@ -143,10 +133,7 @@ test "blockchain is valid if no data corrupted" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    const prev_hash = try blockchain.getLastHash();
-    const block: Block = try .init(io, allocator, &prev_hash, "some data");
-
-    try blockchain.add(allocator, block);
+    try blockchain.add(io, allocator, "some data");
     try std.testing.expect(blockchain.isValid());
 }
 
@@ -156,20 +143,13 @@ test "blockchain is not valid if data corrupted" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    var prev_hash = try blockchain.getLastHash();
-    const block_a: Block = try .init(io, allocator, &prev_hash, "Some data");
+    try blockchain.add(io, allocator, "Some data");
+    const block = try blockchain.getLastBlock();
+    try blockchain.add(io, allocator, "Another data");
 
-    try blockchain.add(allocator, block_a);
-
-    prev_hash = try blockchain.getLastHash();
-    const block_b: Block = try .init(io, allocator, &prev_hash, "Another data");
-
-    try blockchain.add(allocator, block_b);
-
-    const last_block = &blockchain.blocks.items[blockchain.blocks.items.len - 1];
     const corrupted = try allocator.dupe(u8, "Corrupted");
-    allocator.free(last_block.data);
-    last_block.data = corrupted;
+    allocator.free(block.data);
+    @constCast(block).data = corrupted;
 
     try std.testing.expect(!blockchain.isValid());
 }
@@ -183,15 +163,8 @@ test "blockchain replaces if chain is valid" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    var prev_hash = try blockchain.getLastHash();
-    const block_a: Block = try .init(io, allocator, &prev_hash, "Some data");
-
-    try blockchain.add(allocator, block_a);
-
-    prev_hash = try blockchain.getLastHash();
-    const block_b: Block = try .init(io, allocator, &prev_hash, "Another data");
-
-    try blockchain.add(allocator, block_b);
+    try blockchain.add(io, allocator, "Some data");
+    try blockchain.add(io, allocator, "Another data");
 
     try initial.replace(allocator, &blockchain);
     try std.testing.expect(initial.blocks.items.len == blockchain.blocks.items.len);
@@ -203,24 +176,12 @@ test "blockchain not replaces if incoming chain is shorter" {
     var initial: Self = try .init(allocator);
     defer initial.deinit(allocator);
 
-    var prev_hash = try initial.getLastHash();
-    const block_a: Block = try .init(io, allocator, &prev_hash, "Some data");
-
-    try initial.add(allocator, block_a);
-
-    prev_hash = try initial.getLastHash();
-    const block_b: Block = try .init(io, allocator, &prev_hash, "Another data");
-
-    try initial.add(allocator, block_b);
-
+    try initial.add(io, allocator, "Some data");
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    prev_hash = try blockchain.getLastHash();
-
-    prev_hash = try blockchain.getLastHash();
-    const block_c: Block = try .init(io, allocator, &prev_hash, "Some data");
-    try blockchain.add(allocator, block_c);
+    try blockchain.replace(allocator, &initial);
+    try initial.add(io, allocator, "Another data");
 
     try std.testing.expectError(error.ChainLengthIsEqualOrLess, initial.replace(allocator, &blockchain));
 }
@@ -231,17 +192,11 @@ test "blockchain not replaces if incoming chain is same length" {
     var initial: Self = try .init(allocator);
     defer initial.deinit(allocator);
 
-    var prev_hash = try initial.getLastHash();
-    const block_a: Block = try .init(io, allocator, &prev_hash, "Some data");
-
-    try initial.add(allocator, block_a);
-
+    try initial.add(io, allocator, "Some data");
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    prev_hash = try blockchain.getLastHash();
-    const block_b: Block = try .init(io, allocator, &prev_hash, "Some data");
-    try blockchain.add(allocator, block_b);
+    try blockchain.replace(allocator, &initial);
 
     try std.testing.expectError(error.ChainLengthIsEqualOrLess, initial.replace(allocator, &blockchain));
 }
@@ -252,26 +207,17 @@ test "blockchain not replaces if incoming chain is invalid" {
     var initial: Self = try .init(allocator);
     defer initial.deinit(allocator);
 
-    var prev_hash = try initial.getLastHash();
-    const block_a: Block = try .init(io, allocator, &prev_hash, "Some data");
-    try initial.add(allocator, block_a);
-
+    try initial.add(io, allocator, "Some data");
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    prev_hash = try blockchain.getLastHash();
-    const block_b: Block = try .init(io, allocator, &prev_hash, "Some data");
-    try blockchain.add(allocator, block_b);
+    try blockchain.replace(allocator, &initial);
+    try blockchain.add(io, allocator, "Another data");
 
-    prev_hash = try blockchain.getLastHash();
-    const block_c: Block = try .init(io, allocator, &prev_hash, "Another data");
-
-    try blockchain.add(allocator, block_c);
-
-    const last_block = &blockchain.blocks.items[blockchain.blocks.items.len - 1];
+    const last_block = try blockchain.getLastBlock();
     const corrupted = try allocator.dupe(u8, "Corrupted");
     allocator.free(last_block.data);
-    last_block.data = corrupted;
+    @constCast(last_block).data = corrupted;
 
     try std.testing.expectError(error.InvalidChain, initial.replace(allocator, &blockchain));
 }

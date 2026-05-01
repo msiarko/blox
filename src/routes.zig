@@ -5,7 +5,7 @@ const core = @import("core");
 const volt = @import("volt");
 
 const State = @import("State.zig");
-const p = @import("peer.zig");
+const Peer = @import("Peer.zig");
 const p2p = @import("p2p.zig");
 
 pub const AppState = *State;
@@ -19,7 +19,6 @@ pub fn router(allocator: std.mem.Allocator, state: AppState) !Router {
     try r.get(allocator, "/ws", &webSockets);
     try r.get(allocator, "/blocks", &blocks);
     try r.post(allocator, "/mine", &mine);
-    try r.post(allocator, "/form", &testForm);
 
     return r;
 }
@@ -32,22 +31,16 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     var ws = try volt.extract.WebSocket.init(ctx);
     defer ws.flush() catch {};
 
-    var peer: p.Peer = try p.parse(state.allocator, peer_uri);
-    var peer_key_buffer: [64]u8 = undefined;
-    const peer_key = peer.print(&peer_key_buffer) catch |err| {
-        peer.deinit(ctx.io, state.allocator);
-        return err;
-    };
+    var peer = try Peer.parse(state.allocator, peer_uri);
+    defer peer.deinit(ctx.io, state.allocator);
 
-    std.log.info("Peer {s} connected", .{peer_key});
-    const peer_ptr = state.addPeer(ctx.io, peer_key, peer) catch |err| {
-        peer.deinit(ctx.io, state.allocator);
-        return err;
-    };
+    try state.addPeer(ctx.io, &peer);
+    var peer_key_buffer: [64]u8 = undefined;
+    const peer_key = try peer.print(&peer_key_buffer);
     defer state.removePeer(ctx.io, peer_key) catch {};
 
-    // peer_ptr is heap-allocated (*Peer) – stable across any future hashmap resizes.
-    var sub_task = ctx.io.async(subscribe, .{ ctx.io, state.allocator, &peer_ptr.message_queue, &ws });
+    std.log.info("Peer {s} connected", .{peer_key});
+    var sub_task = ctx.io.async(subscribe, .{ ctx.io, state.allocator, &peer.message_queue, &ws });
     defer sub_task.cancel(ctx.io) catch {};
 
     try state.broadcast(ctx.io);
@@ -84,22 +77,6 @@ fn subscribe(
         try ws.writeMessage(update, .text);
         try ws.flush();
     }
-}
-
-const Person = struct {
-    @"na me": []const u8,
-    age: u8,
-};
-
-fn testForm(ctx: volt.Context, form: volt.extract.Form(Person)) !volt.Response {
-    const form_data = form.result catch |err| {
-        return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
-    };
-
-    const content = std.fmt.allocPrint(ctx.req_arena, "Hello, {s}! You are {d} years old.", .{ form_data.@"na me", form_data.age }) catch |err| {
-        return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
-    };
-    return .text(ctx.req_arena, .ok, content, null);
 }
 
 fn blocks(ctx: volt.Context, state: AppState) !volt.Response {

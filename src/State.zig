@@ -3,7 +3,7 @@ const Io = std.Io;
 
 const Blockchain = @import("Blockchain.zig");
 const Block = @import("Block.zig");
-const Peer = @import("peer.zig").Peer;
+const Peer = @import("Peer.zig");
 
 const Self = @This();
 
@@ -26,29 +26,19 @@ pub fn init(allocator: std.mem.Allocator, self_peer: Peer, peers: []Peer) !Self 
         var it = self.peers.iterator();
         while (it.next()) |entry| {
             allocator.free(entry.key_ptr.*);
-            allocator.free(entry.value_ptr.*.buffer);
-            allocator.free(entry.value_ptr.*.uri_string);
-            allocator.destroy(entry.value_ptr.*);
+            allocator.destroy(entry.value_ptr);
         }
         self.peers.deinit();
         self.chain.deinit(allocator);
     }
 
     var key_buf: [64]u8 = undefined;
-    for (peers) |peer| {
-        const peer_ptr = try self.allocator.create(Peer);
-        peer_ptr.* = peer;
-        errdefer {
-            self.allocator.free(peer_ptr.*.buffer);
-            self.allocator.free(peer_ptr.*.uri_string);
-            self.allocator.destroy(peer_ptr);
-        }
-
-        const tmp_key = try peer_ptr.print(&key_buf);
+    for (peers) |*peer| {
+        const tmp_key = try peer.print(&key_buf);
         const owned_key = try self.allocator.dupe(u8, tmp_key);
         errdefer self.allocator.free(owned_key);
 
-        try self.peers.put(owned_key, peer_ptr);
+        try self.peers.put(owned_key, peer);
     }
 
     return self;
@@ -56,13 +46,11 @@ pub fn init(allocator: std.mem.Allocator, self_peer: Peer, peers: []Peer) !Self 
 
 pub fn deinit(self: *Self, io: Io) void {
     self.broadcast_group.cancel(io);
-    self.self_peer.deinit(io, self.allocator);
 
     var it = self.peers.iterator();
     while (it.next()) |entry| {
         self.allocator.free(entry.key_ptr.*);
-        entry.value_ptr.*.deinit(io, self.allocator);
-        self.allocator.destroy(entry.value_ptr.*);
+        self.allocator.destroy(entry.value_ptr);
     }
     self.peers.deinit();
     self.chain.deinit(self.allocator);
@@ -77,20 +65,17 @@ pub fn printChain(self: *Self, io: Io, writer: *std.Io.Writer) !void {
 pub fn addPeer(
     self: *Self,
     io: Io,
-    peer_key: []const u8,
-    peer: Peer,
-) !*Peer {
+    peer: *Peer,
+) !void {
+    var peer_key_buffer: [64]u8 = undefined;
+    const peer_key = try peer.print(&peer_key_buffer);
+
     const owned_key = try self.allocator.dupe(u8, peer_key);
     errdefer self.allocator.free(owned_key);
 
-    const peer_ptr = try self.allocator.create(Peer);
-    errdefer self.allocator.destroy(peer_ptr);
-    peer_ptr.* = peer;
-
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    try self.peers.put(owned_key, peer_ptr);
-    return peer_ptr;
+    try self.peers.put(owned_key, peer);
 }
 
 pub fn removePeer(
@@ -103,8 +88,6 @@ pub fn removePeer(
 
     if (self.peers.fetchRemove(peer_key)) |kv| {
         self.allocator.free(kv.key);
-        kv.value.deinit(io, self.allocator);
-        self.allocator.destroy(kv.value);
     }
 }
 
@@ -129,18 +112,13 @@ pub fn send(self: *Self, io: Io, peer: *Peer) !void {
     try peer.message_queue.putOne(io, msg);
 }
 
+// This might take a long time to mine a block
+// Fix: Create a task queue with to put there the received data
+// Client can query the operation status with the task ID, which will be sent in respose
 pub fn mine(self: *Self, io: Io, data: []const u8) !void {
-    const last_hash = blk: {
-        try self.lock.lock(io);
-        defer self.lock.unlock(io);
-        break :blk try self.chain.getLastHash();
-    };
-
-    const new_item = try Block.init(io, self.allocator, &last_hash, data);
-
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    return self.chain.add(self.allocator, new_item);
+    return self.chain.add(io, self.allocator, data);
 }
 
 pub fn replace(self: *Self, io: Io, chain: *const Blockchain) !void {
