@@ -1,5 +1,6 @@
 const std = @import("std");
 const fmt = std.fmt;
+const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
@@ -8,8 +9,6 @@ const options = @import("options");
 pub const Hash = [Sha256.digest_length]u8;
 const Timestamp = i64;
 const Nonce = u64;
-
-const mine_rate_ms = 3_000;
 
 const Self = @This();
 
@@ -20,7 +19,7 @@ nonce: Nonce,
 data: []const u8,
 difficulty: u4,
 
-pub fn genesis(allocator: std.mem.Allocator) !Self {
+pub fn genesis(allocator: Allocator) !Self {
     const hash = hashData(
         options.genesis_timestamp,
         options.genesis_prev_hash,
@@ -39,12 +38,12 @@ pub fn genesis(allocator: std.mem.Allocator) !Self {
     };
 }
 
-pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+pub fn deinit(self: *@This(), allocator: Allocator) void {
     allocator.free(self.data);
     self.* = undefined;
 }
 
-pub fn init(io: Io, allocator: std.mem.Allocator, prev_block: *const Self, data: []const u8) !@This() {
+pub fn init(io: Io, allocator: Allocator, prev_block: *const Self, data: []const u8) !@This() {
     if (data.len == 0) return error.EmptyData;
     const result = generateHash(io, prev_block, data);
     // Ownership transfer: the caller supplies a (possibly stack/temporary) slice;
@@ -72,7 +71,7 @@ pub fn isHashValid(self: *const @This()) bool {
     return std.mem.eql(u8, &generated_hash, &self.hash);
 }
 
-pub fn jsonStringify(self: *const Self, stringify: anytype) !void {
+pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
     try stringify.beginObject();
 
     try stringify.objectField("timestamp");
@@ -138,7 +137,7 @@ fn generateHash(io: Io, prev_block: *const Self, data: []const u8) GenerateHashR
 }
 
 fn adjustDifficulty(prev_block: *const Self, timestamp: i64) u4 {
-    if (prev_block.timestamp + mine_rate_ms > timestamp)
+    if (prev_block.timestamp + options.mine_rate_ms > timestamp)
         return prev_block.difficulty + 1;
 
     return prev_block.difficulty - 1;

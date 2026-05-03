@@ -27,8 +27,9 @@ pub fn build(b: *std.Build) void {
     options.addOption(u4, "genesis_difficulty", 2);
     options.addOption([Sha256.digest_length]u8, "genesis_prev_hash", [_]u8{0} ** Sha256.digest_length);
     options.addOption([]const u8, "genesis_data", "GENESIS");
-    options.addOption(i64, "genesis_timestamp", 199204);
-    options.addOption(u64, "genesis_nonce", 3349);
+    options.addOption(i64, "genesis_timestamp", 199_204);
+    options.addOption(u64, "genesis_nonce", 3_349);
+    options.addOption(u16, "mine_rate_ms", 3_000);
     options.addOption(Env, "env", env);
     mod.addOptions("options", options);
 

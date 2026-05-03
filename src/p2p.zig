@@ -207,32 +207,24 @@ pub fn update(
     };
     defer parsed.deinit();
 
-    var blocks = try std.ArrayList(Block).initCapacity(allocator, parsed.value.len);
-
-    var blocks_owned = false;
-    defer if (!blocks_owned) {
-        for (blocks.items) |*b| b.deinit(allocator);
-        blocks.deinit(allocator);
-    };
-
-    for (parsed.value) |item| {
+    var blocks: []Block = undefined;
+    for (parsed.value, 0..) |item, i| {
         const b = item.toBlock() catch |err| {
             std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
             return; // defer above handles cleanup
         };
-        const owned_data = try allocator.dupe(u8, b.data);
-        blocks.appendAssumeCapacity(.{
+
+        blocks[i] = .{
             .timestamp = b.timestamp,
             .prev_hash = b.prev_hash,
             .hash = b.hash,
             .nonce = b.nonce,
             .difficulty = b.difficulty,
-            .data = owned_data,
-        });
+            .data = item.data,
+        };
     }
 
-    var new_chain: Blockchain = .{ .blocks = blocks };
-    blocks_owned = true;
+    var new_chain: Blockchain = try .fromSlice(allocator, blocks);
     defer new_chain.deinit(allocator);
 
     state.replace(io, &new_chain) catch |err| {
