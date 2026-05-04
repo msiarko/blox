@@ -317,10 +317,10 @@ fn startPeerSession(
         const drained = peer.message_queue.get(io, &drain_buf, 0) catch 0;
         for (drain_buf[0..drained]) |stale| allocator.free(stale);
     }
-    defer ws.flush() catch {};
+    defer _ = ws.flush();
 
-    var publish_task = io.async(publish, .{ io, allocator, &peer.message_queue, &ws });
-    defer publish_task.cancel(io) catch {};
+    var publish_task = try io.concurrent(publish, .{ io, allocator, &peer.message_queue, &ws });
+    defer _ = publish_task.cancel(io);
 
     try state.send(io, peer);
 

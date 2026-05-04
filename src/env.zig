@@ -15,6 +15,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, env_map: *Map) !void {
             "Failed to read {s} file: {s}\n",
             .{ env_filename, @errorName(err) },
         );
+        defer allocator.free(message);
         @panic(message);
     };
 

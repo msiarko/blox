@@ -29,7 +29,7 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     };
 
     var ws = try volt.extract.WebSocket.init(ctx);
-    defer ws.flush() catch {};
+    defer _ = ws.flush();
 
     var peer = try Peer.parse(state.allocator, peer_uri);
     defer peer.deinit(ctx.io, state.allocator);
@@ -40,8 +40,8 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     defer state.removePeer(ctx.io, peer_key) catch {};
 
     std.log.info("Peer {s} connected", .{peer_key});
-    var sub_task = ctx.io.async(subscribe, .{ ctx.io, state.allocator, &peer.message_queue, &ws });
-    defer sub_task.cancel(ctx.io) catch {};
+    var sub_task = try ctx.io.concurrent(subscribe, .{ ctx.io, state.allocator, &peer.message_queue, &ws });
+    defer _ = sub_task.cancel(ctx.io);
 
     try state.broadcast(ctx.io);
 
