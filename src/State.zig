@@ -112,9 +112,6 @@ pub fn send(self: *Self, io: Io, peer: *Peer) !void {
     try peer.message_queue.putOne(io, msg);
 }
 
-// This might take a long time to mine a block
-// Fix: Create a task queue with to put there the received data
-// Client can query the operation status with the task ID, which will be sent in respose
 pub fn mine(self: *Self, io: Io, data: []const u8) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
