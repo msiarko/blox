@@ -49,7 +49,6 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
         const msg = ws.readSmallMessage() catch |err| {
             switch (err) {
                 WebSocket.ReadSmallTextMessageError.ConnectionClose => {
-                    peer.message_queue.close(ctx.io);
                     std.log.info("Peer {s} disconnected", .{peer_key});
                 },
                 else => std.log.warn("Error reading message from peer {s}: {s}", .{ peer_key, @errorName(err) }),

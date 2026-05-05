@@ -207,22 +207,13 @@ pub fn update(
     };
     defer parsed.deinit();
 
-    var blocks: []Block = try allocator.alloc(Block, parsed.value.len);
+    const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
     defer allocator.free(blocks);
 
-    for (parsed.value, 0..) |item, i| {
-        const b = item.toBlock() catch |err| {
+    for (parsed.value, blocks) |*item, *block| {
+        block.* = item.toBlock() catch |err| {
             std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
             return; // defer above handles cleanup
-        };
-
-        blocks[i] = .{
-            .timestamp = b.timestamp,
-            .prev_hash = b.prev_hash,
-            .hash = b.hash,
-            .nonce = b.nonce,
-            .difficulty = b.difficulty,
-            .data = item.data,
         };
     }
 
