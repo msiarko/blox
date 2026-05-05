@@ -59,7 +59,7 @@ pub fn deinit(self: *Self, io: Io) void {
 pub fn printChain(self: *Self, io: Io, writer: *std.Io.Writer) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    try self.chain.printJson(writer);
+    return self.chain.printJson(writer);
 }
 
 pub fn addPeer(

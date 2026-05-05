@@ -62,7 +62,7 @@ pub fn fromSlice(allocator: Allocator, slice: []const Block) !Self {
             .hash = item.hash,
             .nonce = item.nonce,
             .difficulty = item.difficulty,
-            .data = item.data,
+            .data = try allocator.dupe(u8, item.data),
         });
     }
 

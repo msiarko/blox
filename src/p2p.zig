@@ -207,7 +207,9 @@ pub fn update(
     };
     defer parsed.deinit();
 
-    var blocks: []Block = undefined;
+    var blocks: []Block = try allocator.alloc(Block, parsed.value.len);
+    defer allocator.free(blocks);
+
     for (parsed.value, 0..) |item, i| {
         const b = item.toBlock() catch |err| {
             std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
@@ -252,7 +254,7 @@ pub fn connectAll(
         defer state.lock.unlock(io);
         var it = state.peers.valueIterator();
         while (it.next()) |ptr| {
-            peer_connections.async(io, connect, .{ io, allocator, state, ptr.* });
+            try peer_connections.concurrent(io, connect, .{ io, allocator, state, ptr.* });
         }
     }
 
@@ -317,10 +319,10 @@ fn startPeerSession(
         const drained = peer.message_queue.get(io, &drain_buf, 0) catch 0;
         for (drain_buf[0..drained]) |stale| allocator.free(stale);
     }
-    defer _ = ws.flush();
+    defer ws.flush() catch {};
 
     var publish_task = try io.concurrent(publish, .{ io, allocator, &peer.message_queue, &ws });
-    defer _ = publish_task.cancel(io);
+    defer publish_task.cancel(io) catch {};
 
     try state.send(io, peer);
 

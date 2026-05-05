@@ -29,7 +29,7 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     };
 
     var ws = try volt.extract.WebSocket.init(ctx);
-    defer _ = ws.flush();
+    defer ws.flush() catch {};
 
     var peer = try Peer.parse(state.allocator, peer_uri);
     defer peer.deinit(ctx.io, state.allocator);
@@ -41,14 +41,17 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
 
     std.log.info("Peer {s} connected", .{peer_key});
     var sub_task = try ctx.io.concurrent(subscribe, .{ ctx.io, state.allocator, &peer.message_queue, &ws });
-    defer _ = sub_task.cancel(ctx.io);
+    defer sub_task.cancel(ctx.io) catch {};
 
     try state.broadcast(ctx.io);
 
     while (true) {
         const msg = ws.readSmallMessage() catch |err| {
             switch (err) {
-                WebSocket.ReadSmallTextMessageError.ConnectionClose => std.log.info("Peer {s} disconnected", .{peer_key}),
+                WebSocket.ReadSmallTextMessageError.ConnectionClose => {
+                    peer.message_queue.close(ctx.io);
+                    std.log.info("Peer {s} disconnected", .{peer_key});
+                },
                 else => std.log.warn("Error reading message from peer {s}: {s}", .{ peer_key, @errorName(err) }),
             }
             break;
