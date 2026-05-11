@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(i64, "genesis_timestamp", 199_204);
     options.addOption(u64, "genesis_nonce", 3_349);
     options.addOption(u16, "mine_rate_ms", 3_000);
+    options.addOption(i128, "initial_balance", 500);
     options.addOption(Env, "env", env);
     mod.addOptions("options", options);
 
