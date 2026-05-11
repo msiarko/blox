@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const Allocator = std.mem.Allocator;
 
 const Blockchain = @import("Blockchain.zig");
 const Block = @import("Block.zig");
@@ -196,7 +197,7 @@ pub const BlockJson = struct {
 
 pub fn update(
     io: Io,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     state: AppState,
     json: []const u8,
 ) !void {
@@ -230,7 +231,7 @@ pub fn update(
 
 pub fn connectAll(
     io: Io,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     state: AppState,
 ) !void {
     if (state.peers.count() == 0) {
@@ -255,7 +256,7 @@ pub fn connectAll(
 
 fn connect(
     io: Io,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     state: AppState,
     peer: *Peer,
 ) Io.Cancelable!void {
@@ -285,7 +286,7 @@ fn connect(
 
 fn startPeerSession(
     io: Io,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     state: AppState,
     peer: *Peer,
 ) !void {
@@ -342,7 +343,7 @@ fn startPeerSession(
 
 fn publish(
     io: Io,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     updates_queue: *Io.Queue([]const u8),
     ws: *ClientWebSocket,
 ) !void {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const g = @import("global.zig");
 const Block = @import("Block.zig");
@@ -27,7 +28,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     self.* = undefined;
 }
 
-pub fn add(self: *Self, io: std.Io, allocator: Allocator, data: []const u8) !void {
+pub fn add(self: *Self, io: Io, allocator: Allocator, data: []const u8) !void {
     const prev_block = try self.getLastBlock();
     const block = try Block.init(io, allocator, &prev_block, data);
     try self.blocks.append(allocator, block);

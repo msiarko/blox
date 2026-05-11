@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const Allocator = std.mem.Allocator;
 
 const Blockchain = @import("Blockchain.zig");
 const Block = @import("Block.zig");
@@ -14,7 +15,7 @@ peers: std.StringHashMap(*Peer),
 self_peer: Peer,
 broadcast_group: std.Io.Group = .init,
 
-pub fn init(allocator: std.mem.Allocator, self_peer: Peer, peers: []Peer) !Self {
+pub fn init(allocator: Allocator, self_peer: Peer, peers: []Peer) !Self {
     var self: Self = .{
         .allocator = allocator,
         .lock = .init,

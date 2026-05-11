@@ -46,17 +46,13 @@ pub fn deinit(self: *@This(), allocator: Allocator) void {
 pub fn init(io: Io, allocator: Allocator, prev_block: *const Self, data: []const u8) !@This() {
     if (data.len == 0) return error.EmptyData;
     const result = generateHash(io, prev_block, data);
-    // Ownership transfer: the caller supplies a (possibly stack/temporary) slice;
-    // we dup it into a fresh heap allocation so that this `Block` owns its `data`
-    // for its entire lifetime. `deinit` is responsible for freeing it.
-    const data_owned = try allocator.dupe(u8, data);
     return .{
         .timestamp = result.timestamp,
         .prev_hash = prev_block.hash,
         .hash = result.hash,
         .nonce = result.nonce,
         .difficulty = result.diffuculty,
-        .data = data_owned,
+        .data = try allocator.dupe(u8, data),
     };
 }
 

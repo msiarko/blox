@@ -1,11 +1,13 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const Map = std.process.Environ.Map;
-const Dir = std.Io.Dir;
+const Io = std.Io;
+const Dir = Io.Dir;
+const FileOpenError = Io.File.OpenError;
 const builtin = @import("builtin");
 const env = @import("options").env;
-const FileOpenError = std.Io.File.OpenError;
 
-pub fn load(io: std.Io, allocator: std.mem.Allocator, env_map: *Map) !void {
+pub fn load(io: Io, allocator: Allocator, env_map: *Map) !void {
     var buffer: [1024]u8 = undefined;
 
     const env_filename = @tagName(env) ++ ".env";

@@ -1,6 +1,8 @@
 const std = @import("std");
 const Environ = std.process.Environ;
 const IpAddress = std.Io.net.IpAddress;
+const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const volt = @import("volt");
 
@@ -10,7 +12,7 @@ const routes = @import("routes.zig");
 const p2p = @import("p2p.zig");
 const Peer = @import("Peer.zig");
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator, env_map: *Environ.Map) !void {
+pub fn run(io: Io, allocator: Allocator, env_map: *Environ.Map) !void {
     var env_arena = std.heap.ArenaAllocator.init(allocator);
     defer env_arena.deinit();
 
@@ -40,7 +42,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, env_map: *Environ.Map) !voi
     try server.listen(routes.AppState, allocator, address, &router);
 }
 
-fn getPeers(allocator: std.mem.Allocator, env_map: *Environ.Map) ![]Peer {
+fn getPeers(allocator: Allocator, env_map: *Environ.Map) ![]Peer {
     const peers_str = env_map.get("PEERS") orelse return allocator.alloc(Peer, 0);
     var it = std.mem.splitScalar(u8, peers_str, ',');
     var list: std.ArrayList(Peer) = try .initCapacity(allocator, 8);

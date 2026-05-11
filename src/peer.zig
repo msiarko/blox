@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const Allocator = std.mem.Allocator;
 
 const Self = @This();
 
@@ -8,7 +9,7 @@ uri_buf: ?[]const u8,
 message_queue: Io.Queue([]const u8),
 buffer: [][]const u8,
 
-pub fn init(allocator: std.mem.Allocator, peer_uri: []const u8) !Self {
+pub fn init(allocator: Allocator, peer_uri: []const u8) !Self {
     const buffer = try allocator.alloc([]const u8, 1);
     return .{
         .uri = try std.Uri.parse(peer_uri),
@@ -18,7 +19,7 @@ pub fn init(allocator: std.mem.Allocator, peer_uri: []const u8) !Self {
     };
 }
 
-pub fn deinit(self: *Self, io: Io, allocator: std.mem.Allocator) void {
+pub fn deinit(self: *Self, io: Io, allocator: Allocator) void {
     self.message_queue.close(io);
     allocator.free(self.buffer);
     if (self.uri_buf) |b| allocator.free(b);
@@ -51,11 +52,11 @@ pub fn print(self: *const Self, buffer: []u8) ![]u8 {
     return std.fmt.bufPrint(buffer, "{s}:{d}", .{ host, port });
 }
 
-pub fn parse(allocator: std.mem.Allocator, peer_uri: []const u8) !Self {
+pub fn parse(allocator: Allocator, peer_uri: []const u8) !Self {
     return .init(allocator, peer_uri);
 }
 
-pub fn initFromAddress(allocator: std.mem.Allocator, address: Io.net.IpAddress) !Self {
+pub fn initFromAddress(allocator: Allocator, address: Io.net.IpAddress) !Self {
     const ip = address.ip4.bytes;
     const uri_string = try std.fmt.allocPrint(
         allocator,

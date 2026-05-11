@@ -1,5 +1,7 @@
 const std = @import("std");
 const WebSocket = std.http.Server.WebSocket;
+const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const core = @import("core");
 const volt = @import("volt");
@@ -12,7 +14,7 @@ pub const AppState = *State;
 
 const Router = volt.Router(AppState);
 
-pub fn router(allocator: std.mem.Allocator, state: AppState) !Router {
+pub fn router(allocator: Allocator, state: AppState) !Router {
     var r: Router = .init(allocator, state);
     errdefer r.deinit(allocator);
 
@@ -68,8 +70,8 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
 }
 
 fn subscribe(
-    io: std.Io,
-    allocator: std.mem.Allocator,
+    io: Io,
+    allocator: Allocator,
     peer_queue: *std.Io.Queue([]const u8),
     ws: *WebSocket,
 ) !void {
