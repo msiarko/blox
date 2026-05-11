@@ -2,11 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
+const g = @import("global.zig");
 const Block = @import("Block.zig");
 pub const Hash = Block.Hash;
-const json_options: std.json.Stringify.Options = .{
-    .whitespace = if (builtin.mode == .Debug) .indent_2 else .minified,
-};
 
 const Self = @This();
 
@@ -95,7 +93,7 @@ pub fn replace(self: *Self, allocator: Allocator, chain: *const Self) !void {
 pub fn printJson(self: *const Self, writer: *std.Io.Writer) !void {
     var stringify: std.json.Stringify = .{
         .writer = writer,
-        .options = json_options,
+        .options = g.json_options,
     };
 
     try stringify.beginArray();
