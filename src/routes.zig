@@ -10,6 +10,8 @@ const State = @import("State.zig");
 const Peer = @import("Peer.zig");
 const p2p = @import("p2p.zig");
 
+const log = std.log.scoped(.routes);
+
 pub const AppState = *State;
 
 const Router = volt.Router(AppState);
@@ -25,7 +27,11 @@ pub fn router(allocator: Allocator, state: AppState) !Router {
     return r;
 }
 
-fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.Header("Blox-Peer-Uri")) !volt.Response {
+fn webSockets(
+    ctx: volt.Context,
+    state: AppState,
+    peer_uri_header: volt.extract.Header("Blox-Peer-Uri"),
+) !volt.Response {
     const peer_uri = peer_uri_header.value orelse {
         return .text(ctx.req_arena, .bad_request, "Missing Blox-Peer-Uri header", null);
     };
@@ -41,8 +47,13 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
     const peer_key = try peer.print(&peer_key_buffer);
     defer state.removePeer(ctx.io, peer_key) catch {};
 
-    std.log.info("Peer {s} connected", .{peer_key});
-    var sub_task = try ctx.io.concurrent(subscribe, .{ ctx.io, state.allocator, &peer.message_queue, &ws });
+    log.info("Peer {s} connected", .{peer_key});
+    var sub_task = try ctx.io.concurrent(subscribe, .{
+        ctx.io,
+        state.allocator,
+        &peer.message_queue,
+        &ws,
+    });
     defer sub_task.cancel(ctx.io) catch {};
 
     try state.broadcast(ctx.io);
@@ -51,15 +62,15 @@ fn webSockets(ctx: volt.Context, state: AppState, peer_uri_header: volt.extract.
         const msg = ws.readSmallMessage() catch |err| {
             switch (err) {
                 WebSocket.ReadSmallTextMessageError.ConnectionClose => {
-                    std.log.info("Peer {s} disconnected", .{peer_key});
+                    log.info("Peer {s} disconnected", .{peer_key});
                 },
-                else => std.log.warn("Error reading message from peer {s}: {s}", .{ peer_key, @errorName(err) }),
+                else => log.warn("Error reading message from peer {s}: {s}", .{ peer_key, @errorName(err) }),
             }
             break;
         };
         switch (msg.opcode) {
             .text => {
-                std.log.info("Received chain update from inbound peer {s}", .{peer_key});
+                log.info("Received chain update from inbound peer {s}", .{peer_key});
                 try p2p.update(ctx.io, state.allocator, state, msg.data);
             },
             else => continue,
@@ -101,8 +112,6 @@ fn mine(ctx: volt.Context, state: AppState, mine_request: volt.extract.Json(Mine
         return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
     };
 
-    // `server_allocator` required — the mined Block's `data` is appended to the
-    // persistent chain and must not be tied to the lifetime of this HTTP request.
     try state.mine(ctx.io, payload.data);
     try state.broadcast(ctx.io);
     return .ok(ctx.req_arena, "Block mined successfully", null);

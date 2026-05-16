@@ -3,6 +3,7 @@ const fmt = std.fmt;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Sha256 = std.crypto.hash.sha2.Sha256;
+const builtin = @import("builtin");
 
 const options = @import("options");
 
@@ -110,7 +111,7 @@ const GenerateHashResult = struct {
 fn generateHash(io: Io, prev_block: *const Self, data: []const u8) GenerateHashResult {
     var nonce: Nonce = 0;
     var difficulty = prev_block.difficulty;
-    while (true) : (nonce += 1) {
+    while (true) : (nonce +%= 1) {
         const timestamp = Io.Timestamp.now(io, .real).toMilliseconds();
         difficulty = adjustDifficulty(prev_block, timestamp);
         const generated_hash = hashData(
@@ -134,16 +135,16 @@ fn generateHash(io: Io, prev_block: *const Self, data: []const u8) GenerateHashR
 
 fn adjustDifficulty(prev_block: *const Self, timestamp: i64) u4 {
     if (prev_block.timestamp + options.mine_rate_ms > timestamp)
-        return prev_block.difficulty + 1;
+        return prev_block.difficulty +| 1;
 
-    return prev_block.difficulty - 1;
+    return prev_block.difficulty -| 1;
 }
 
 fn hashData(
     timestamp: Timestamp,
     prev_hash: Hash,
     nonce: Nonce,
-    difficulty: u8,
+    difficulty: u4,
     data: []const u8,
 ) Hash {
     var hasher: Sha256 = .init(.{});

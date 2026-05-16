@@ -52,13 +52,3 @@ fn getPeers(allocator: Allocator, env_map: *Environ.Map) ![]Peer {
     }
     return list.toOwnedSlice(allocator);
 }
-
-test {
-    const Blockchain = @import("Blockchain.zig");
-    const Block = @import("Block.zig");
-    const Transaction = @import("Transaction.zig");
-
-    _ = std.testing.refAllDecls(Block);
-    _ = std.testing.refAllDecls(Blockchain);
-    _ = std.testing.refAllDecls(Transaction);
-}

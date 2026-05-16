@@ -2,9 +2,12 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
-const Blockchain = @import("Blockchain.zig");
-const Block = @import("Block.zig");
+const core = @import("core");
+const Blockchain = core.Blockchain;
+const Block = core.Blockchain.Block;
 const Peer = @import("Peer.zig");
+
+const log = std.log.scoped(.state);
 
 const Self = @This();
 
@@ -153,7 +156,7 @@ fn publish(io: std.Io, peer: *Peer, json: []const u8) std.Io.Cancelable!void {
     peer.message_queue.putOne(io, json) catch |err| {
         var buf: [64]u8 = undefined;
         const peer_str = peer.print(&buf) catch "unknown";
-        std.log.warn("Failed to send chain update to peer {s}: {s}", .{ peer_str, @errorName(err) });
+        log.warn("Failed to send chain update to peer {s}: {s}", .{ peer_str, @errorName(err) });
         return;
     };
 }

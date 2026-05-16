@@ -1,7 +1,6 @@
 const std = @import("std");
 const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 const options = @import("options");
-const g = @import("global.zig");
 
 const Self = @This();
 
@@ -21,7 +20,7 @@ pub fn init(io: std.Io, balance: ?f128) Self {
 pub fn printJson(self: *const Self, writer: *std.Io.Writer) !void {
     var stringify: std.json.Stringify = .{
         .writer = writer,
-        .options = g.json_options,
+        .options = .{},
     };
 
     try stringify.beginObject();

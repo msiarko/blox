@@ -2,11 +2,14 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
-const Blockchain = @import("Blockchain.zig");
-const Block = @import("Block.zig");
+const core = @import("core");
+const Blockchain = core.Blockchain;
+const Block = core.Blockchain.Block;
 
 const Peer = @import("Peer.zig");
 const AppState = @import("routes.zig").AppState;
+
+const log = std.log.scoped(.p2p);
 
 pub const ClientWebSocket = struct {
     const Self = @This();
@@ -203,7 +206,7 @@ pub fn update(
 ) !void {
     const parsed = std.json.parseFromSlice([]const BlockJson, allocator, json, .{}) catch |err| {
         if (err == error.OutOfMemory) return err;
-        std.log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
+        log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
         return;
     };
     defer parsed.deinit();
@@ -213,8 +216,8 @@ pub fn update(
 
     for (parsed.value, blocks) |*item, *block| {
         block.* = item.toBlock() catch |err| {
-            std.log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
-            return; // defer above handles cleanup
+            log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
+            return;
         };
     }
 
@@ -223,10 +226,10 @@ pub fn update(
 
     state.replace(io, &new_chain) catch |err| {
         if (err == error.OutOfMemory) return err;
-        std.log.info("Did not replace chain ({s})", .{@errorName(err)});
+        log.info("Did not replace chain ({s})", .{@errorName(err)});
         return;
     };
-    std.log.info("Chain replaced from peer update", .{});
+    log.info("Chain replaced from peer update", .{});
 }
 
 pub fn connectAll(
@@ -268,7 +271,7 @@ fn connect(
                 else => {
                     const host = peer.getHost() catch return error.Canceled;
                     const port = peer.getPort();
-                    std.log.warn(
+                    log.warn(
                         "Peer {s}:{d} session ended ({s}), reconnecting in {d} ms",
                         .{ host, port, @errorName(err), delay_ms },
                     );
@@ -293,7 +296,7 @@ fn startPeerSession(
     const address = try peer.getAddress();
     var stream = address.connect(io, .{ .mode = .stream }) catch |err| {
         const host = peer.getHost() catch return err;
-        std.log.warn("Cannot connect to {s}:{d}: {s}", .{ host, peer.getPort(), @errorName(err) });
+        log.warn("Cannot connect to {s}:{d}: {s}", .{ host, peer.getPort(), @errorName(err) });
         return err;
     };
     defer stream.close(io);
@@ -327,13 +330,13 @@ fn startPeerSession(
             .text => {
                 var buf: [128]u8 = undefined;
                 const peer_key = peer.print(&buf) catch "unknown";
-                std.log.info("Received chain update from peer {s}", .{peer_key});
+                log.info("Received chain update from peer {s}", .{peer_key});
                 try update(io, allocator, state, msg.data);
             },
             .connection_close => {
                 var buf: [128]u8 = undefined;
                 const peer_key = peer.print(&buf) catch "unknown";
-                std.log.info("Peer {s} closed the connection gracefully, will reconnect", .{peer_key});
+                log.info("Peer {s} closed the connection gracefully, will reconnect", .{peer_key});
                 return;
             },
             else => continue,

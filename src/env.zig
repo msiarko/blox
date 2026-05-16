@@ -5,7 +5,7 @@ const Io = std.Io;
 const Dir = Io.Dir;
 const FileOpenError = Io.File.OpenError;
 const builtin = @import("builtin");
-const env = @import("options").env;
+const env = @import("options").environment;
 
 pub fn load(io: Io, allocator: Allocator, env_map: *Map) !void {
     var buffer: [1024]u8 = undefined;
