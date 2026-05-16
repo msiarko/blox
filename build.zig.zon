@@ -1,0 +1,19 @@
+.{
+    .name = .blox,
+    .version = "0.0.0",
+    .fingerprint = 0x4d1d5cb61ec14f7a,
+    .minimum_zig_version = "0.16.0-dev.2984+cb7d2b056",
+    .dependencies = .{
+        .volt = .{
+            .url = "git+https://github.com/msiarko/volt#6cedb6ab7dff24109374b61fe6311c47129b3846",
+            .hash = "volt-0.0.8-ZvV_WecbAgD_SJZbpOPI_KYJg3czy_Wmlr-ResnvcSUd",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        //"README.md",
+    },
+}
