@@ -6,13 +6,17 @@ const Io = std.Io;
 
 const volt = @import("volt");
 
-const State = @import("State.zig");
 const env = @import("env.zig");
-const routes = @import("routes.zig");
 const p2p = @import("p2p.zig");
 const Peer = @import("Peer.zig");
+const routes = @import("routes.zig");
+const State = @import("State.zig");
 
-pub fn run(io: Io, allocator: Allocator, env_map: *Environ.Map) !void {
+pub fn run(
+    io: Io,
+    allocator: Allocator,
+    env_map: *Environ.Map,
+) !void {
     var env_arena = std.heap.ArenaAllocator.init(allocator);
     defer env_arena.deinit();
 
@@ -33,7 +37,7 @@ pub fn run(io: Io, allocator: Allocator, env_map: *Environ.Map) !void {
     var state: State = try .init(allocator, self_peer, peers);
     defer state.deinit(io);
 
-    var peer_connections = io.async(p2p.connectAll, .{ io, allocator, &state });
+    var peer_connections = try io.concurrent(p2p.connectAll, .{ io, allocator, &state });
     defer peer_connections.cancel(io) catch {};
 
     var router = try routes.router(allocator, &state);

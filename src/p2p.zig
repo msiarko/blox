@@ -1,6 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const DefaultPrng = std.Random.DefaultPrng;
 
 const core = @import("core");
 const Blockchain = core.Blockchain;
@@ -32,9 +33,15 @@ pub const ClientWebSocket = struct {
         data: []const u8,
     };
 
-    pub fn init(io: Io, input: *Io.Reader, output: *Io.Writer) Self {
+    pub fn init(
+        io: Io,
+        input: *Io.Reader,
+        output: *Io.Writer,
+    ) Self {
         var mask_key: [4]u8 = undefined;
-        var default_rng = std.Random.DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMicroseconds()));
+        var default_rng = DefaultPrng.init(
+            @intCast(Io.Timestamp.now(io, .real).toMicroseconds()),
+        );
         var random = default_rng.random();
         random.bytes(&mask_key);
 
@@ -45,7 +52,11 @@ pub const ClientWebSocket = struct {
         };
     }
 
-    pub fn writeMessage(self: *Self, data: []const u8, opcode: Opcode) !void {
+    pub fn writeMessage(
+        self: *Self,
+        data: []const u8,
+        opcode: Opcode,
+    ) !void {
         try self.output.writeAll(&.{0x80 | @as(u8, @intFromEnum(opcode))});
 
         if (data.len < 126) {
@@ -82,7 +93,9 @@ pub const ClientWebSocket = struct {
         writer: *Io.net.Stream.Writer,
     ) !Self {
         var key_bytes: [16]u8 = undefined;
-        var rng = std.Random.DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMicroseconds()));
+        var rng = DefaultPrng.init(
+            @intCast(Io.Timestamp.now(io, .real).toMicroseconds()),
+        );
         rng.random().bytes(&key_bytes);
         var key_buf: [std.base64.standard.Encoder.calcSize(16)]u8 = undefined;
         const key = std.base64.standard.Encoder.encode(&key_buf, &key_bytes);

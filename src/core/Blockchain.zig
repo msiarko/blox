@@ -27,7 +27,12 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     self.* = undefined;
 }
 
-pub fn add(self: *Self, io: Io, allocator: Allocator, data: []const u8) !void {
+pub fn add(
+    self: *Self,
+    io: Io,
+    allocator: Allocator,
+    data: []const u8,
+) !void {
     const prev_block = try self.getLastBlock();
     const block = try Block.init(io, allocator, &prev_block, data);
     try self.blocks.append(allocator, block);
@@ -67,7 +72,11 @@ pub fn fromSlice(allocator: Allocator, slice: []const Block) !Self {
     return .{ .blocks = blocks };
 }
 
-pub fn replace(self: *Self, allocator: Allocator, chain: *const Self) !void {
+pub fn replace(
+    self: *Self,
+    allocator: Allocator,
+    chain: *const Self,
+) !void {
     if (self.blocks.len >= chain.blocks.len) return error.ShortBlockchain;
     if (!chain.isValid()) return error.InvalidChain;
     for (0..self.blocks.len) |i| {
