@@ -2,26 +2,26 @@ const std = @import("std");
 const fmt = std.fmt;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const Sha256 = std.crypto.hash.sha2.Sha256;
+const h = @import("hash.zig");
 const builtin = @import("builtin");
 
 const options = @import("options");
 
-pub const Hash = [Sha256.digest_length]u8;
 const Timestamp = i64;
 const Nonce = u64;
 
 const Self = @This();
 
-prev_hash: Hash,
-hash: Hash,
+prev_hash: h.Hash,
+hash: h.Hash,
 timestamp: Timestamp,
 nonce: Nonce,
 data: []const u8,
 difficulty: u4,
 
 pub fn genesis(allocator: Allocator) !Self {
-    const hash = hashData(
+    const hash = try hashData(
+        allocator,
         options.genesis_timestamp,
         options.genesis_prev_hash,
         options.genesis_nonce,
@@ -49,9 +49,9 @@ pub fn init(
     allocator: Allocator,
     prev_block: *const Self,
     data: []const u8,
-) !@This() {
+) !Self {
     if (data.len == 0) return error.EmptyData;
-    const result = generateHash(io, prev_block, data);
+    const result = try generateHash(io, allocator, prev_block, data);
     return .{
         .timestamp = result.timestamp,
         .prev_hash = prev_block.hash,
@@ -62,8 +62,9 @@ pub fn init(
     };
 }
 
-pub fn isHashValid(self: *const @This()) bool {
-    const generated_hash = hashData(
+pub fn isHashValid(self: *const Self, allocator: Allocator) !bool {
+    const generated_hash = try hashData(
+        allocator,
         self.timestamp,
         self.prev_hash,
         self.nonce,
@@ -97,7 +98,7 @@ pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
     try stringify.endObject();
 }
 
-pub fn eql(self: *const @This(), other: *const @This()) bool {
+pub fn eql(self: *const Self, other: *const Self) bool {
     return self.timestamp == other.timestamp and
         std.mem.eql(u8, &self.prev_hash, &other.prev_hash) and
         std.mem.eql(u8, &self.hash, &other.hash) and
@@ -107,7 +108,7 @@ pub fn eql(self: *const @This(), other: *const @This()) bool {
 }
 
 const GenerateHashResult = struct {
-    hash: Hash,
+    hash: h.Hash,
     nonce: Nonce,
     timestamp: Timestamp,
     diffuculty: u4,
@@ -115,15 +116,17 @@ const GenerateHashResult = struct {
 
 fn generateHash(
     io: Io,
+    allocator: Allocator,
     prev_block: *const Self,
     data: []const u8,
-) GenerateHashResult {
+) !GenerateHashResult {
     var nonce: Nonce = 0;
     var difficulty = prev_block.difficulty;
     while (true) : (nonce +%= 1) {
         const timestamp = Io.Timestamp.now(io, .real).toMilliseconds();
         difficulty = adjustDifficulty(prev_block, timestamp);
-        const generated_hash = hashData(
+        const generated_hash = try hashData(
+            allocator,
             timestamp,
             prev_block.hash,
             nonce,
@@ -150,20 +153,27 @@ fn adjustDifficulty(prev_block: *const Self, timestamp: i64) u4 {
 }
 
 fn hashData(
+    allocator: std.mem.Allocator,
     timestamp: Timestamp,
-    prev_hash: Hash,
+    prev_hash: h.Hash,
     nonce: Nonce,
     difficulty: u4,
     data: []const u8,
-) Hash {
-    var hasher: Sha256 = .init(.{});
-    hasher.update(std.mem.asBytes(&timestamp));
-    hasher.update(&prev_hash);
-    hasher.update(data);
-    hasher.update(std.mem.asBytes(&nonce));
-    hasher.update(std.mem.asBytes(&difficulty));
+) !h.Hash {
+    const s = try std.fmt.allocPrint(
+        allocator,
+        "{d}{s}{s}{d}{d}",
+        .{
+            timestamp,
+            &prev_hash,
+            data,
+            nonce,
+            difficulty,
+        },
+    );
+    defer allocator.free(s);
 
-    return hasher.finalResult();
+    return h.hash(s);
 }
 
 test "first mined block prev hash matches genesis hash" {
