@@ -101,7 +101,11 @@ fn blocks(ctx: volt.Context, state: AppState) !volt.Response {
     return .json(ctx.req_arena, .ok, content, null);
 }
 
-fn mine(ctx: volt.Context, state: AppState, mine_request: volt.extract.Json(MineRequest)) !volt.Response {
+fn mine(
+    ctx: volt.Context,
+    state: AppState,
+    mine_request: volt.extract.Json(MineRequest),
+) !volt.Response {
     const payload = mine_request.result catch |err| {
         if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and
             !isMemberOfErrorSet(std.mem.Allocator.Error, err))

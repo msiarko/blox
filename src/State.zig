@@ -18,7 +18,11 @@ peers: std.StringHashMap(*Peer),
 self_peer: Peer,
 broadcast_group: std.Io.Group = .init,
 
-pub fn init(allocator: Allocator, self_peer: Peer, peers: []Peer) !Self {
+pub fn init(
+    allocator: Allocator,
+    self_peer: Peer,
+    peers: []Peer,
+) !Self {
     var self: Self = .{
         .allocator = allocator,
         .lock = .init,
@@ -60,7 +64,11 @@ pub fn deinit(self: *Self, io: Io) void {
     self.chain.deinit(self.allocator);
 }
 
-pub fn printChain(self: *Self, io: Io, writer: *std.Io.Writer) !void {
+pub fn printChain(
+    self: *Self,
+    io: Io,
+    writer: *std.Io.Writer,
+) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
     return self.chain.printJson(writer);
@@ -95,7 +103,11 @@ pub fn removePeer(
     }
 }
 
-pub fn send(self: *Self, io: Io, peer: *Peer) !void {
+pub fn send(
+    self: *Self,
+    io: Io,
+    peer: *Peer,
+) !void {
     var allocating = std.Io.Writer.Allocating.init(self.allocator);
     defer allocating.deinit();
 
@@ -116,13 +128,21 @@ pub fn send(self: *Self, io: Io, peer: *Peer) !void {
     try peer.message_queue.putOne(io, msg);
 }
 
-pub fn mine(self: *Self, io: Io, data: []const u8) !void {
+pub fn mine(
+    self: *Self,
+    io: Io,
+    data: []const u8,
+) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
     return self.chain.add(io, self.allocator, data);
 }
 
-pub fn replace(self: *Self, io: Io, chain: *const Blockchain) !void {
+pub fn replace(
+    self: *Self,
+    io: Io,
+    chain: *const Blockchain,
+) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
     return self.chain.replace(self.allocator, chain);
@@ -152,7 +172,11 @@ pub fn broadcast(self: *Self, io: Io) !void {
     }
 }
 
-fn publish(io: std.Io, peer: *Peer, json: []const u8) std.Io.Cancelable!void {
+fn publish(
+    io: std.Io,
+    peer: *Peer,
+    json: []const u8,
+) std.Io.Cancelable!void {
     peer.message_queue.putOne(io, json) catch |err| {
         var buf: [64]u8 = undefined;
         const peer_str = peer.print(&buf) catch "unknown";

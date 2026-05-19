@@ -44,7 +44,12 @@ pub fn deinit(self: *@This(), allocator: Allocator) void {
     self.* = undefined;
 }
 
-pub fn init(io: Io, allocator: Allocator, prev_block: *const Self, data: []const u8) !@This() {
+pub fn init(
+    io: Io,
+    allocator: Allocator,
+    prev_block: *const Self,
+    data: []const u8,
+) !@This() {
     if (data.len == 0) return error.EmptyData;
     const result = generateHash(io, prev_block, data);
     return .{
@@ -108,7 +113,11 @@ const GenerateHashResult = struct {
     diffuculty: u4,
 };
 
-fn generateHash(io: Io, prev_block: *const Self, data: []const u8) GenerateHashResult {
+fn generateHash(
+    io: Io,
+    prev_block: *const Self,
+    data: []const u8,
+) GenerateHashResult {
     var nonce: Nonce = 0;
     var difficulty = prev_block.difficulty;
     while (true) : (nonce +%= 1) {
