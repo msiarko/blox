@@ -1,6 +1,8 @@
 const std = @import("std");
 const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 const options = @import("options");
+const Transaction = @import("Transaction.zig");
+const h = @import("hash.zig");
 
 const Self = @This();
 
@@ -15,6 +17,10 @@ pub fn init(io: std.Io, balance: ?f128) Self {
         .key_pair = key_pair,
         .public_key = key_pair.public_key,
     };
+}
+
+pub fn sign(self: *const Self, hash: h.Hash) !ecdsa.Signature {
+    return try self.key_pair.sign(&hash, null);
 }
 
 pub fn printJson(self: *const Self, writer: *std.Io.Writer) !void {
