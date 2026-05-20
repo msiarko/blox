@@ -163,13 +163,13 @@ fn hashData(
 ) !h.Hash {
     const s = try std.fmt.allocPrint(
         allocator,
-        "{d}{s}{s}{d}{d}",
+        "{x}{x}{x}{x}{x}",
         .{
-            timestamp,
+            &std.mem.toBytes(timestamp),
             &prev_hash,
             data,
-            nonce,
-            difficulty,
+            &std.mem.toBytes(nonce),
+            &std.mem.toBytes(difficulty),
         },
     );
     defer allocator.free(s);

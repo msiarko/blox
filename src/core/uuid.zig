@@ -11,12 +11,12 @@ pub fn genV4(rand: Random) Guid {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     var buf: Guid = undefined;
-    _ = std.fmt.bufPrint(&buf, "{s}-{s}-{s}-{s}-{s}", .{
-        std.fmt.bytesToHex(bytes[0..4], .lower),
-        std.fmt.bytesToHex(bytes[4..6], .lower),
-        std.fmt.bytesToHex(bytes[6..8], .lower),
-        std.fmt.bytesToHex(bytes[8..10], .lower),
-        std.fmt.bytesToHex(bytes[10..16], .lower),
+    _ = std.fmt.bufPrint(&buf, "{x}-{x}-{x}-{x}-{x}", .{
+        bytes[0..4],
+        bytes[4..6],
+        bytes[6..8],
+        bytes[8..10],
+        bytes[10..16],
     }) catch unreachable;
 
     return buf;
