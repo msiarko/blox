@@ -23,10 +23,11 @@ const Self = @This();
 
 id: uuid.Guid,
 input: Input,
-outputs: [2]Output,
+outputs: std.ArrayList(Output),
 
 pub fn init(
     io: std.Io,
+    allocator: std.mem.Allocator,
     rand: Random,
     sender: *const Wallet,
     recipient: PublicKey,
@@ -36,19 +37,78 @@ pub fn init(
     var transaction: Self = .{
         .id = uuid.genV4(rand),
         .input = undefined,
-        .outputs = .{
-            .{ .amount = sender.balance - amount, .address = sender.public_key },
-            .{ .amount = amount, .address = recipient },
-        },
+        .outputs = try .initCapacity(allocator, 2),
     };
 
-    try Self.sign(io, &transaction, sender);
+    transaction.outputs.appendAssumeCapacity(.{
+        .amount = sender.balance - amount,
+        .address = sender.public_key,
+    });
+    transaction.outputs.appendAssumeCapacity(.{
+        .amount = amount,
+        .address = recipient,
+    });
+
+    try Self.sign(io, allocator, &transaction, sender);
     return transaction;
 }
 
-fn sign(io: std.Io, transaction: *Self, sender: *const Wallet) !void {
-    var buf: [2 * (@sizeOf(f128) + PublicKey.compressed_sec1_encoded_length)]u8 = undefined;
-    const outputs = try Self.stringifyOutputs(&buf, transaction);
+pub fn verify(self: *const Self, allocator: std.mem.Allocator) !bool {
+    var allocating: std.Io.Writer.Allocating = .init(allocator);
+    defer allocating.deinit();
+
+    try self.printOutputs(&allocating.writer);
+    const outputs = allocating.written();
+    self.input.signature.verify(
+        &h.hash(outputs),
+        self.input.address,
+    ) catch return false;
+
+    return true;
+}
+
+pub fn update(
+    self: *Self,
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    sender: *const Wallet,
+    recipient: PublicKey,
+    amount: f128,
+) !void {
+    if (self.outputs.items.len == 0) return error.NoOutputs;
+    const sender_output = blk: {
+        for (self.outputs.items) |*o| {
+            if (std.mem.eql(
+                u8,
+                &o.address.toCompressedSec1(),
+                &sender.public_key.toCompressedSec1(),
+            )) break :blk o;
+        }
+
+        break :blk null;
+    } orelse return error.SenderOutputNotFound;
+
+    if (amount > sender_output.amount) return error.AmountExceedsBalance;
+
+    sender_output.amount -= amount;
+    try self.outputs.append(
+        allocator,
+        .{ .amount = amount, .address = recipient },
+    );
+    try Self.sign(io, allocator, self, sender);
+}
+
+pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+    self.outputs.deinit(allocator);
+    self.* = undefined;
+}
+
+fn sign(io: std.Io, allocator: std.mem.Allocator, transaction: *Self, sender: *const Wallet) !void {
+    var allocating: std.Io.Writer.Allocating = .init(allocator);
+    defer allocating.deinit();
+
+    try transaction.printOutputs(&allocating.writer);
+    const outputs = allocating.written();
     transaction.input = .{
         .timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds(),
         .amount = sender.balance,
@@ -57,13 +117,11 @@ fn sign(io: std.Io, transaction: *Self, sender: *const Wallet) !void {
     };
 }
 
-fn stringifyOutputs(buffer: []u8, transaction: *const Self) ![]const u8 {
-    var fixed = std.Io.Writer.fixed(buffer);
-    for (transaction.outputs) |o| {
-        try fixed.print("{s}", .{&std.mem.toBytes(o.amount)});
-        try fixed.print("{s}", .{&o.address.toCompressedSec1()});
+fn printOutputs(self: *const Self, writer: *std.Io.Writer) !void {
+    for (self.outputs.items) |*o| {
+        try writer.printFloat(o.amount, .{ .precision = 2 });
+        try writer.printHex(&o.address.toCompressedSec1(), .lower);
     }
-    return buffer[0..fixed.end];
 }
 
 test "init returns transaction when amount is less than wallet's balance" {
@@ -72,20 +130,28 @@ test "init returns transaction when amount is less than wallet's balance" {
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
 
-    const transaction = try Self.init(std.testing.io, rand, &wallet, public_key, 200);
+    var transaction = try Self.init(
+        std.testing.io,
+        std.testing.allocator,
+        rand,
+        &wallet,
+        public_key,
+        200,
+    );
+    defer transaction.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(800.00, transaction.outputs[0].amount);
+    try std.testing.expectEqual(800.00, transaction.outputs.items[0].amount);
     try std.testing.expectEqualSlices(
         u8,
         &wallet.public_key.toUncompressedSec1(),
-        &transaction.outputs[0].address.toUncompressedSec1(),
+        &transaction.outputs.items[0].address.toUncompressedSec1(),
     );
 
-    try std.testing.expectEqual(200.00, transaction.outputs[1].amount);
+    try std.testing.expectEqual(200.00, transaction.outputs.items[1].amount);
     try std.testing.expectEqualSlices(
         u8,
         &public_key.toUncompressedSec1(),
-        &transaction.outputs[1].address.toUncompressedSec1(),
+        &transaction.outputs.items[1].address.toUncompressedSec1(),
     );
 }
 
@@ -95,6 +161,122 @@ test "init returns AmountExceedsBalace error when amount is greater than wallet'
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
 
-    const result = Self.init(std.testing.io, rand, &wallet, public_key, 200);
+    const result = Self.init(
+        std.testing.io,
+        std.testing.allocator,
+        rand,
+        &wallet,
+        public_key,
+        200,
+    );
+
     try std.testing.expectError(error.AmountExceedsBalance, result);
+}
+
+test "init sets input amount to wallet's balance" {
+    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
+    const rand = default_rand.random();
+    const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
+
+    var transaction = try Self.init(
+        std.testing.io,
+        std.testing.allocator,
+        rand,
+        &wallet,
+        public_key,
+        200,
+    );
+    defer transaction.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(1000.00, transaction.input.amount);
+}
+
+test "verify returns true for valid transaction" {
+    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
+    const rand = default_rand.random();
+    const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
+
+    var transaction = try Self.init(
+        std.testing.io,
+        std.testing.allocator,
+        rand,
+        &wallet,
+        public_key,
+        200,
+    );
+    defer transaction.deinit(std.testing.allocator);
+
+    try std.testing.expect(try transaction.verify(std.testing.allocator));
+}
+
+test "verify returns false for tampered transaction" {
+    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
+    const rand = default_rand.random();
+    const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
+
+    var transaction = try Self.init(
+        std.testing.io,
+        std.testing.allocator,
+        rand,
+        &wallet,
+        public_key,
+        200,
+    );
+    defer transaction.deinit(std.testing.allocator);
+
+    transaction.outputs.items[0].amount = 900.00;
+
+    try std.testing.expect(!try transaction.verify(std.testing.allocator));
+}
+
+test "update modifies outputs and re-signs transaction" {
+    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
+    const rand = default_rand.random();
+    const recipient1 = ecdsa.KeyPair.generate(std.testing.io).public_key;
+    const recipient2 = ecdsa.KeyPair.generate(std.testing.io).public_key;
+
+    var transaction = try Self.init(
+        std.testing.io,
+        std.testing.allocator,
+        rand,
+        &wallet,
+        recipient1,
+        200,
+    );
+    defer transaction.deinit(std.testing.allocator);
+
+    try transaction.update(
+        std.testing.io,
+        std.testing.allocator,
+        &wallet,
+        recipient2,
+        300,
+    );
+
+    try std.testing.expectEqual(500.00, transaction.outputs.items[0].amount);
+    try std.testing.expectEqualSlices(
+        u8,
+        &wallet.public_key.toUncompressedSec1(),
+        &transaction.outputs.items[0].address.toUncompressedSec1(),
+    );
+
+    try std.testing.expectEqual(200.00, transaction.outputs.items[1].amount);
+    try std.testing.expectEqualSlices(
+        u8,
+        &recipient1.toUncompressedSec1(),
+        &transaction.outputs.items[1].address.toUncompressedSec1(),
+    );
+
+    try std.testing.expectEqual(300.00, transaction.outputs.items[2].amount);
+    try std.testing.expectEqualSlices(
+        u8,
+        &recipient2.toUncompressedSec1(),
+        &transaction.outputs.items[2].address.toUncompressedSec1(),
+    );
+
+    try std.testing.expect(try transaction.verify(std.testing.allocator));
 }
