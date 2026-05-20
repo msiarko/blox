@@ -9,6 +9,7 @@ const options = @import("options");
 
 const Timestamp = i64;
 const Nonce = u64;
+const Difficulty = u4;
 
 const Self = @This();
 
@@ -17,7 +18,7 @@ hash: h.Hash,
 timestamp: Timestamp,
 nonce: Nonce,
 data: []const u8,
-difficulty: u4,
+difficulty: Difficulty,
 
 pub fn genesis(allocator: Allocator) !Self {
     const hash = try hashData(
@@ -57,7 +58,7 @@ pub fn init(
         .prev_hash = prev_block.hash,
         .hash = result.hash,
         .nonce = result.nonce,
-        .difficulty = result.diffuculty,
+        .difficulty = result.difficulty,
         .data = try allocator.dupe(u8, data),
     };
 }
@@ -111,7 +112,7 @@ const GenerateHashResult = struct {
     hash: h.Hash,
     nonce: Nonce,
     timestamp: Timestamp,
-    diffuculty: u4,
+    difficulty: Difficulty,
 };
 
 fn generateHash(
@@ -139,13 +140,13 @@ fn generateHash(
                 .hash = generated_hash,
                 .nonce = nonce,
                 .timestamp = timestamp,
-                .diffuculty = difficulty,
+                .difficulty = difficulty,
             };
         }
     }
 }
 
-fn adjustDifficulty(prev_block: *const Self, timestamp: i64) u4 {
+fn adjustDifficulty(prev_block: *const Self, timestamp: i64) Difficulty {
     if (prev_block.timestamp + options.mine_rate_ms > timestamp)
         return prev_block.difficulty +| 1;
 
@@ -157,7 +158,7 @@ fn hashData(
     timestamp: Timestamp,
     prev_hash: h.Hash,
     nonce: Nonce,
-    difficulty: u4,
+    difficulty: Difficulty,
     data: []const u8,
 ) !h.Hash {
     const s = try std.fmt.allocPrint(
