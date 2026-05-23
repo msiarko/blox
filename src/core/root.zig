@@ -1,6 +1,7 @@
 pub const Blockchain = @import("Blockchain.zig");
 pub const Wallet = @import("Wallet.zig");
 pub const Transaction = @import("Transaction.zig");
+pub const TransactionPool = @import("TransactionPool.zig");
 
 test {
     const refAllDecls = @import("std").testing.refAllDecls;
@@ -8,4 +9,5 @@ test {
     _ = refAllDecls(Blockchain.Block);
     _ = refAllDecls(Wallet);
     _ = refAllDecls(Transaction);
+    _ = refAllDecls(TransactionPool);
 }
