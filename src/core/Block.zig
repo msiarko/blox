@@ -7,6 +7,7 @@ const builtin = @import("builtin");
 
 const options = @import("options");
 
+pub const Hash = h.Hash;
 const Timestamp = i64;
 const Nonce = u64;
 const Difficulty = u4;

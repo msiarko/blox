@@ -20,9 +20,9 @@ pub fn router(allocator: Allocator, state: AppState) !Router {
     var r: Router = .init(allocator, state);
     errdefer r.deinit(allocator);
 
-    try r.get(allocator, "/ws", &webSockets);
-    try r.get(allocator, "/blocks", &blocks);
-    try r.post(allocator, "/mine", &mine);
+    try r.get(allocator, "/ws", webSockets);
+    try r.get(allocator, "/blocks", blocks);
+    try r.post(allocator, "/mine", mine);
 
     return r;
 }
