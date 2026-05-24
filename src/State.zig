@@ -14,11 +14,14 @@ const Self = @This();
 allocator: std.mem.Allocator,
 lock: std.Io.Mutex,
 chain: Blockchain,
+transaction_pool: core.TransactionPool,
+wallet: core.Wallet,
 peers: std.StringHashMap(*Peer),
 self_peer: Peer,
 broadcast_group: std.Io.Group = .init,
 
 pub fn init(
+    io: Io,
     allocator: Allocator,
     self_peer: Peer,
     peers: []Peer,
@@ -27,6 +30,8 @@ pub fn init(
         .allocator = allocator,
         .lock = .init,
         .chain = try .init(allocator),
+        .transaction_pool = .init,
+        .wallet = .init(io, null),
         .peers = .init(allocator),
         .self_peer = self_peer,
     };
@@ -61,6 +66,7 @@ pub fn deinit(self: *Self, io: Io) void {
         self.allocator.destroy(entry.value_ptr);
     }
     self.peers.deinit();
+    self.transaction_pool.deinit(self.allocator);
     self.chain.deinit(self.allocator);
 }
 
@@ -72,6 +78,16 @@ pub fn printChain(
     try self.lock.lock(io);
     defer self.lock.unlock(io);
     return self.chain.printJson(writer);
+}
+
+pub fn printTransactions(
+    self: *Self,
+    io: Io,
+    writer: *std.Io.Writer,
+) !void {
+    try self.lock.lock(io);
+    defer self.lock.unlock(io);
+    return self.transaction_pool.printJson(writer);
 }
 
 pub fn addPeer(

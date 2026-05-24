@@ -34,7 +34,7 @@ pub fn run(
     defer self_peer.deinit(io, allocator);
 
     var server: volt.Server = try .init(io, .{});
-    var state: State = try .init(allocator, self_peer, peers);
+    var state: State = try .init(io, allocator, self_peer, peers);
     defer state.deinit(io);
 
     var peer_connections = try io.concurrent(p2p.connectAll, .{ io, allocator, &state });

@@ -2,6 +2,9 @@ const std = @import("std");
 const WebSocket = std.http.Server.WebSocket;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const Random = std.Random;
+const DefaultPrng = std.Random.DefaultPrng;
+const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 
 const core = @import("core");
 const volt = @import("volt");
@@ -22,6 +25,8 @@ pub fn router(allocator: Allocator, state: AppState) !Router {
 
     try r.get(allocator, "/ws", webSockets);
     try r.get(allocator, "/blocks", blocks);
+    try r.get(allocator, "/transactions", transactions);
+    try r.post(allocator, "/transactions", createTransaction);
     try r.post(allocator, "/mine", mine);
 
     return r;
@@ -121,6 +126,37 @@ fn mine(
     return .ok(ctx.req_arena, "Block mined successfully", null);
 }
 
+fn transactions(ctx: volt.Context, state: AppState) !volt.Response {
+    var writer = std.Io.Writer.Allocating.init(ctx.req_arena);
+    try state.printTransactions(ctx.io, &writer.writer);
+    const content = writer.written();
+    return .json(ctx.req_arena, .ok, content, null);
+}
+
+fn createTransaction(
+    ctx: volt.Context,
+    state: AppState,
+    transaction_request: volt.extract.Json(TransactionRequest),
+) !volt.Response {
+    const payload = transaction_request.result catch |err| {
+        if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and
+            !isMemberOfErrorSet(std.mem.Allocator.Error, err))
+        {
+            return .text(ctx.req_arena, .bad_request, @errorName(err), null);
+        }
+
+        return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
+    };
+
+    var default_rand = DefaultPrng.init(@intCast(std.Io.Timestamp.now(ctx.io, .real).toMicroseconds()));
+    const rand = default_rand.random();
+
+    var buf: [33]u8 = undefined;
+    const sec1 = try std.fmt.hexToBytes(&buf, payload.recipient);
+    try state.wallet.createTransaction(ctx.io, state.allocator, rand, try ecdsa.PublicKey.fromSec1(sec1), payload.amount, &state.transaction_pool);
+    return .ok(ctx.req_arena, "Transaction created successfully", null);
+}
+
 fn isMemberOfErrorSet(comptime T: type, err: anyerror) bool {
     const info = @typeInfo(T);
     if (info != .error_set) @compileError("T should be an error set");
@@ -134,4 +170,9 @@ fn isMemberOfErrorSet(comptime T: type, err: anyerror) bool {
 
 const MineRequest = struct {
     data: []u8,
+};
+
+const TransactionRequest = struct {
+    recipient: []u8,
+    amount: f128,
 };
