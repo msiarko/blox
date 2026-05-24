@@ -124,6 +124,39 @@ fn printOutputs(self: *const Self, writer: *std.Io.Writer) !void {
     }
 }
 
+pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+    try stringify.beginObject();
+
+    try stringify.objectField("id");
+    try stringify.write(self.id);
+
+    try stringify.objectField("input");
+    try stringify.beginObject();
+    try stringify.objectField("timestamp");
+    try stringify.write(self.input.timestamp);
+    try stringify.objectField("amount");
+    try stringify.write(self.input.amount);
+    try stringify.objectField("address");
+    try stringify.write(std.fmt.bytesToHex(self.input.address.toCompressedSec1(), .lower));
+    try stringify.objectField("signature");
+    try stringify.write(std.fmt.bytesToHex(self.input.signature.toBytes(), .lower));
+    try stringify.endObject();
+
+    try stringify.objectField("outputs");
+    try stringify.beginArray();
+    for (self.outputs.items) |*o| {
+        try stringify.beginObject();
+        try stringify.objectField("amount");
+        try stringify.write(o.amount);
+        try stringify.objectField("address");
+        try stringify.write(std.fmt.bytesToHex(o.address.toCompressedSec1(), .lower));
+        try stringify.endObject();
+    }
+    try stringify.endArray();
+
+    try stringify.endObject();
+}
+
 test "init returns transaction when amount is less than wallet's balance" {
     const wallet: Wallet = .init(std.testing.io, 1000.00);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);

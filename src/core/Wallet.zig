@@ -83,7 +83,7 @@ test "init with balance sets balance" {
     try std.testing.expectEqual(100.0, wallet.balance);
 }
 
-test "public key is derived from key pair" {
+test "init public key is derived from key pair" {
     const wallet = Self.init(std.testing.io, null);
     try std.testing.expectEqual(wallet.key_pair.public_key, wallet.public_key);
 }
