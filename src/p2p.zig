@@ -2,6 +2,9 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const DefaultPrng = std.Random.DefaultPrng;
+const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
+const PublicKey = ecdsa.PublicKey;
+const Signature = ecdsa.Signature;
 
 const core = @import("core");
 const Blockchain = core.Blockchain;
@@ -185,64 +188,49 @@ pub const ClientWebSocket = struct {
     }
 };
 
-pub const BlockJson = struct {
-    prev_hash: []const u8,
-    hash: []const u8,
-    timestamp: i64,
-    nonce: u64,
-    difficulty: u4,
-    data: []const u8,
-
-    pub fn toBlock(self: *const BlockJson) !Block {
-        var prev_hash: Block.Hash = undefined;
-        var hash: Block.Hash = undefined;
-
-        _ = try std.fmt.hexToBytes(&prev_hash, self.prev_hash);
-        _ = try std.fmt.hexToBytes(&hash, self.hash);
-
-        return .{
-            .prev_hash = prev_hash,
-            .hash = hash,
-            .timestamp = self.timestamp,
-            .nonce = self.nonce,
-            .difficulty = self.difficulty,
-            .data = self.data,
-        };
-    }
-};
-
 pub fn update(
     io: Io,
     allocator: Allocator,
     state: AppState,
     json: []const u8,
 ) !void {
-    const parsed = std.json.parseFromSlice([]const BlockJson, allocator, json, .{}) catch |err| {
-        if (err == error.OutOfMemory) return err;
-        log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
-        return;
-    };
-    defer parsed.deinit();
+    _ = io;
+    _ = allocator;
+    _ = state;
+    _ = json;
+    // const p = try std.json.Value.jsonParse(allocator, json, .{});
+    // switch (@as(MessageType, @enumFromInt(p.object.get("type").?.integer))) {
+    //     MessageType.blockchain => {
+    //         const parsed = std.json.parseFromSlice([]const BlockJson, allocator, p.object.get("data").?, .{}) catch |err| {
+    //             if (err == error.OutOfMemory) return err;
+    //             log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
+    //             return;
+    //         };
+    //         defer parsed.deinit();
 
-    const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
-    defer allocator.free(blocks);
+    //         const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
+    //         defer allocator.free(blocks);
 
-    for (parsed.value, blocks) |*item, *block| {
-        block.* = item.toBlock() catch |err| {
-            log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
-            return;
-        };
-    }
+    //         for (parsed.value, blocks) |*item, *block| {
+    //             block.* = item.toBlock() catch |err| {
+    //                 log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
+    //                 return;
+    //             };
+    //         }
 
-    var new_chain: Blockchain = try .fromSlice(allocator, blocks);
-    defer new_chain.deinit(allocator);
+    //         var new_chain: Blockchain = try .fromSlice(allocator, blocks);
+    //         defer new_chain.deinit(allocator);
 
-    state.replace(io, &new_chain) catch |err| {
-        if (err == error.OutOfMemory) return err;
-        log.info("Did not replace chain ({s})", .{@errorName(err)});
-        return;
-    };
-    log.info("Chain replaced from peer update", .{});
+    //         state.replaceChain(io, &new_chain) catch |err| {
+    //             if (err == error.OutOfMemory) return err;
+    //             log.info("Did not replace chain ({s})", .{@errorName(err)});
+    //             return;
+    //         };
+    //         log.info("Chain replaced from peer update", .{});
+    //     },
+    //     MessageType.transaction => return error.ToDo,
+    //     else => unreachable,
+    // }
 }
 
 pub fn connectAll(
@@ -266,7 +254,7 @@ pub fn connectAll(
         }
     }
 
-    try state.broadcast(io);
+    try state.broadcastChain(io);
     return peer_connections.await(io);
 }
 
@@ -332,7 +320,7 @@ fn startPeerSession(
     var publish_task = try io.concurrent(publish, .{ io, allocator, &peer.message_queue, &ws });
     defer publish_task.cancel(io) catch {};
 
-    try state.send(io, peer);
+    try state.sendToPeer(io, peer);
 
     const msg_buf = try allocator.alloc(u8, 1024 * 1024);
     defer allocator.free(msg_buf);
@@ -370,3 +358,57 @@ fn publish(
         try ws.flush();
     }
 }
+
+pub const BlockJson = struct {
+    prev_hash: []const u8,
+    hash: []const u8,
+    timestamp: i64,
+    nonce: u64,
+    difficulty: u4,
+    data: []const u8,
+
+    pub fn toBlock(self: *const BlockJson) !Block {
+        var prev_hash: Block.Hash = undefined;
+        var hash: Block.Hash = undefined;
+
+        _ = try std.fmt.hexToBytes(&prev_hash, self.prev_hash);
+        _ = try std.fmt.hexToBytes(&hash, self.hash);
+
+        return .{
+            .prev_hash = prev_hash,
+            .hash = hash,
+            .timestamp = self.timestamp,
+            .nonce = self.nonce,
+            .difficulty = self.difficulty,
+            .data = self.data,
+        };
+    }
+};
+
+pub const TransactionJson = struct {
+    const Input = struct {
+        timestamp: i64,
+        amount: f128,
+        address: [PublicKey.compressed_sec1_encoded_length]u8,
+        signature: [Signature.encoded_length]u8,
+    };
+
+    const Output = struct {
+        amount: f128,
+        address: [PublicKey.compressed_sec1_encoded_length]u8,
+    };
+
+    id: [core.uuid.length]u8,
+    input: Input,
+    outputs: []const Output,
+};
+
+const MessageType = enum {
+    blockchain,
+    transaction,
+};
+
+const Payload = struct {
+    type: u8,
+    data: []const u8,
+};

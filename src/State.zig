@@ -1,6 +1,9 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const Timestamp = Io.Timestamp;
+const DefaultPrng = std.Random.DefaultPrng;
+const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 
 const core = @import("core");
 const Blockchain = core.Blockchain;
@@ -11,10 +14,11 @@ const log = std.log.scoped(.state);
 
 const Self = @This();
 
-allocator: std.mem.Allocator,
-lock: std.Io.Mutex,
+allocator: Allocator,
+lock: Io.Mutex,
 chain: Blockchain,
 transaction_pool: core.TransactionPool,
+rand: std.Random,
 wallet: core.Wallet,
 peers: std.StringHashMap(*Peer),
 self_peer: Peer,
@@ -26,11 +30,13 @@ pub fn init(
     self_peer: Peer,
     peers: []Peer,
 ) !Self {
+    var rand = DefaultPrng.init(@intCast(Timestamp.now(io, .real).toMilliseconds()));
     var self: Self = .{
         .allocator = allocator,
         .lock = .init,
         .chain = try .init(allocator),
         .transaction_pool = .init,
+        .rand = rand.random(),
         .wallet = .init(io, null),
         .peers = .init(allocator),
         .self_peer = self_peer,
@@ -90,6 +96,21 @@ pub fn printTransactions(
     return self.transaction_pool.printJson(writer);
 }
 
+pub fn createTransaction(self: *Self, io: std.Io, recipient: []const u8, amount: f128) !void {
+    try self.lock.lock(io);
+    defer self.lock.unlock(io);
+    var buf: [33]u8 = undefined;
+    const sec1 = try std.fmt.hexToBytes(&buf, recipient);
+    try self.wallet.createTransaction(
+        io,
+        self.allocator,
+        self.rand,
+        try ecdsa.PublicKey.fromSec1(sec1),
+        amount,
+        &self.transaction_pool,
+    );
+}
+
 pub fn addPeer(
     self: *Self,
     io: Io,
@@ -119,7 +140,7 @@ pub fn removePeer(
     }
 }
 
-pub fn send(
+pub fn sendToPeer(
     self: *Self,
     io: Io,
     peer: *Peer,
@@ -144,7 +165,7 @@ pub fn send(
     try peer.message_queue.putOne(io, msg);
 }
 
-pub fn mine(
+pub fn createBlock(
     self: *Self,
     io: Io,
     data: []const u8,
@@ -154,7 +175,7 @@ pub fn mine(
     return self.chain.add(io, self.allocator, data);
 }
 
-pub fn replace(
+pub fn replaceChain(
     self: *Self,
     io: Io,
     chain: *const Blockchain,
@@ -164,7 +185,7 @@ pub fn replace(
     return self.chain.replace(self.allocator, chain);
 }
 
-pub fn broadcast(self: *Self, io: Io) !void {
+pub fn broadcastChain(self: *Self, io: Io) !void {
     if (self.peers.count() == 0) {
         return;
     }

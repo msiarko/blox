@@ -2,11 +2,11 @@
     .name = .blox,
     .version = "0.0.0",
     .fingerprint = 0x4d1d5cb61ec14f7a,
-    .minimum_zig_version = "0.16.0-dev.2984+cb7d2b056",
+    .minimum_zig_version = "0.17.0-dev.864+3deb86baf",
     .dependencies = .{
         .volt = .{
-            .url = "git+https://github.com/msiarko/volt#01192ae8fb9b3d5c9c8765b9d3a6b058cc79d54f",
-            .hash = "volt-0.0.8-ZvV_WXsXAgCUBk3GBnBYhnFnd7ugCbdxpG2gjGlT972u",
+            .url = "git+https://github.com/msiarko/volt#ecbe49eb6268e487386aa6fd8f978f2e5fa74452",
+            .hash = "volt-0.0.8-ZvV_WYAZAgCdXpDhWobA9YOAyTBM2FTfoytK0aL3-NAm",
         },
     },
     .paths = .{
