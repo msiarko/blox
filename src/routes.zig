@@ -2,9 +2,6 @@ const std = @import("std");
 const WebSocket = std.http.Server.WebSocket;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const Random = std.Random;
-const DefaultPrng = std.Random.DefaultPrng;
-const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 
 const core = @import("core");
 const volt = @import("volt");
@@ -27,7 +24,7 @@ pub fn router(allocator: Allocator, state: AppState) !Router {
     try r.get(allocator, "/blocks", blocks);
     try r.get(allocator, "/transactions", transactions);
     try r.post(allocator, "/transactions", createTransaction);
-    try r.post(allocator, "/mine", mine);
+    try r.post(allocator, "/blocks", createBlock);
 
     return r;
 }
@@ -61,7 +58,7 @@ fn webSockets(
     });
     defer sub_task.cancel(ctx.io) catch {};
 
-    try state.broadcast(ctx.io);
+    try state.broadcastChain(ctx.io);
 
     while (true) {
         const msg = ws.readSmallMessage() catch |err| {
@@ -106,7 +103,7 @@ fn blocks(ctx: volt.Context, state: AppState) !volt.Response {
     return .json(ctx.req_arena, .ok, content, null);
 }
 
-fn mine(
+fn createBlock(
     ctx: volt.Context,
     state: AppState,
     mine_request: volt.extract.Json(MineRequest),
@@ -121,8 +118,8 @@ fn mine(
         return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
     };
 
-    try state.mine(ctx.io, payload.data);
-    try state.broadcast(ctx.io);
+    try state.createBlock(ctx.io, payload.data);
+    try state.broadcastChain(ctx.io);
     return .ok(ctx.req_arena, "Block mined successfully", null);
 }
 
@@ -148,12 +145,11 @@ fn createTransaction(
         return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
     };
 
-    var default_rand = DefaultPrng.init(@intCast(std.Io.Timestamp.now(ctx.io, .real).toMicroseconds()));
-    const rand = default_rand.random();
+    state.createTransaction(ctx.io, payload.recipient, payload.amount) catch |err| {
+        if (err == error.AmountExceedsBalance) return .text(ctx.req_arena, .unprocessable_entity, @errorName(err), null);
+        return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
+    };
 
-    var buf: [33]u8 = undefined;
-    const sec1 = try std.fmt.hexToBytes(&buf, payload.recipient);
-    try state.wallet.createTransaction(ctx.io, state.allocator, rand, try ecdsa.PublicKey.fromSec1(sec1), payload.amount, &state.transaction_pool);
     return .ok(ctx.req_arena, "Transaction created successfully", null);
 }
 
@@ -161,9 +157,9 @@ fn isMemberOfErrorSet(comptime T: type, err: anyerror) bool {
     const info = @typeInfo(T);
     if (info != .error_set) @compileError("T should be an error set");
 
-    const error_set = info.error_set orelse return false;
-    inline for (error_set) |err_field| {
-        if (err == @field(T, err_field.name)) return true;
+    const error_names = info.error_set.error_names orelse return false;
+    inline for (error_names) |error_name| {
+        if (err == @field(T, error_name)) return true;
     }
     return false;
 }

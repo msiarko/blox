@@ -2,11 +2,11 @@ const std = @import("std");
 const Environ = std.process.Environ;
 const IpAddress = std.Io.net.IpAddress;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Io = std.Io;
 
 const volt = @import("volt");
 
-const env = @import("env.zig");
 const p2p = @import("p2p.zig");
 const Peer = @import("Peer.zig");
 const routes = @import("routes.zig");
@@ -17,15 +17,14 @@ pub fn run(
     allocator: Allocator,
     env_map: *Environ.Map,
 ) !void {
-    var env_arena = std.heap.ArenaAllocator.init(allocator);
+    var env_arena = ArenaAllocator.init(allocator);
     defer env_arena.deinit();
 
-    try env.load(io, env_arena.allocator(), env_map);
     const peers = try getPeers(allocator, env_map);
     defer allocator.free(peers);
 
     const http_port = blk: {
-        const port = env_map.get("HTTP_PORT") orelse "8080";
+        const port = env_map.get("HTTP_PORT") orelse return error.HttpPortMissing;
         break :blk try std.fmt.parseInt(u16, port, 10);
     };
 
