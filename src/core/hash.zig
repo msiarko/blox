@@ -4,13 +4,7 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 pub const digest_length = Sha256.digest_length;
 pub const Hash = [digest_length]u8;
 
-pub fn hashOne(data: []const u8) Hash {
-    var hasher: Sha256 = .init(.{});
-    hasher.update(data);
-    return hasher.finalResult();
-}
-
-pub fn hashMany(data: anytype) !Hash {
+pub fn hash(data: anytype) Hash {
     const ti = @typeInfo(@TypeOf(data));
     if (!ti.@"struct".is_tuple)
         @compileError("Expected a tuple");

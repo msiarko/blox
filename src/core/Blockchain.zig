@@ -48,7 +48,7 @@ fn isValid(self: *const Self) !bool {
     for (1..self.blocks.len) |i| {
         const curr = self.blocks.get(i);
         const prev_hash = self.blocks.items(.hash)[i - 1];
-        if (!std.mem.eql(u8, &curr.prev_hash, &prev_hash) or !try curr.isHashValid())
+        if (!std.mem.eql(u8, &curr.prev_hash, &prev_hash) or !curr.isHashValid())
             return false;
     }
 

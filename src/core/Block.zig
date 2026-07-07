@@ -22,7 +22,7 @@ data: []const u8,
 difficulty: Difficulty,
 
 pub fn genesis(allocator: Allocator) !Self {
-    const hash = try hashBlockData(
+    const hash = hashBlockData(
         options.genesis_timestamp,
         options.genesis_prev_hash,
         options.genesis_nonce,
@@ -52,7 +52,7 @@ pub fn init(
     data: []const u8,
 ) !Self {
     if (data.len == 0) return error.EmptyData;
-    const result = try generateHash(io, prev_block, data);
+    const result = generateHash(io, prev_block, data);
     return .{
         .timestamp = result.timestamp,
         .prev_hash = prev_block.hash,
@@ -63,8 +63,8 @@ pub fn init(
     };
 }
 
-pub fn isHashValid(self: *const Self) !bool {
-    const generated_hash = try hashBlockData(
+pub fn isHashValid(self: *const Self) bool {
+    const generated_hash = hashBlockData(
         self.timestamp,
         self.prev_hash,
         self.nonce,
@@ -118,13 +118,13 @@ fn generateHash(
     io: Io,
     prev_block: *const Self,
     data: []const u8,
-) !GenerateHashResult {
+) GenerateHashResult {
     var nonce: Nonce = 0;
     var difficulty = prev_block.difficulty;
     while (true) : (nonce +%= 1) {
         const timestamp = Io.Timestamp.now(io, .real).toMilliseconds();
         difficulty = adjustDifficulty(prev_block, timestamp);
-        const generated_hash = try hashBlockData(
+        const generated_hash = hashBlockData(
             timestamp,
             prev_block.hash,
             nonce,
@@ -156,8 +156,8 @@ fn hashBlockData(
     nonce: Nonce,
     difficulty: Difficulty,
     data: []const u8,
-) !h.Hash {
-    return h.hashMany(.{
+) h.Hash {
+    return h.hash(.{
         &std.mem.toBytes(timestamp),
         &prev_hash,
         data,
