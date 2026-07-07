@@ -43,12 +43,12 @@ pub fn getLastBlock(self: *const Self) !Block {
     return self.blocks.get(self.blocks.len - 1);
 }
 
-fn isValid(self: *const Self, allocator: Allocator) !bool {
+fn isValid(self: *const Self) !bool {
     if (self.blocks.len == 0) return false;
     for (1..self.blocks.len) |i| {
         const curr = self.blocks.get(i);
         const prev_hash = self.blocks.items(.hash)[i - 1];
-        if (!std.mem.eql(u8, &curr.prev_hash, &prev_hash) or !try curr.isHashValid(allocator))
+        if (!std.mem.eql(u8, &curr.prev_hash, &prev_hash) or !try curr.isHashValid())
             return false;
     }
 
@@ -78,7 +78,7 @@ pub fn replace(
     chain: *const Self,
 ) !void {
     if (self.blocks.len >= chain.blocks.len) return error.ShortBlockchain;
-    if (!try chain.isValid(allocator)) return error.InvalidChain;
+    if (!try chain.isValid()) return error.InvalidChain;
     for (0..self.blocks.len) |i| {
         const self_block = self.blocks.get(i);
         const chain_block = chain.blocks.get(i);
@@ -146,7 +146,7 @@ test "blockchain is valid if no data corrupted" {
     defer blockchain.deinit(allocator);
 
     try blockchain.add(io, allocator, "some data");
-    try std.testing.expect(try blockchain.isValid(allocator));
+    try std.testing.expect(try blockchain.isValid());
 }
 
 test "blockchain is not valid if data corrupted" {
@@ -161,7 +161,7 @@ test "blockchain is not valid if data corrupted" {
 
     @constCast(block.data)[0] = 'C';
 
-    try std.testing.expect(!try blockchain.isValid(allocator));
+    try std.testing.expect(!try blockchain.isValid());
 }
 
 test "blockchain replaces if chain is valid" {

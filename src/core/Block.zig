@@ -22,8 +22,7 @@ data: []const u8,
 difficulty: Difficulty,
 
 pub fn genesis(allocator: Allocator) !Self {
-    const hash = try hashData(
-        allocator,
+    const hash = try hashBlockData(
         options.genesis_timestamp,
         options.genesis_prev_hash,
         options.genesis_nonce,
@@ -53,7 +52,7 @@ pub fn init(
     data: []const u8,
 ) !Self {
     if (data.len == 0) return error.EmptyData;
-    const result = try generateHash(io, allocator, prev_block, data);
+    const result = try generateHash(io, prev_block, data);
     return .{
         .timestamp = result.timestamp,
         .prev_hash = prev_block.hash,
@@ -64,9 +63,8 @@ pub fn init(
     };
 }
 
-pub fn isHashValid(self: *const Self, allocator: Allocator) !bool {
-    const generated_hash = try hashData(
-        allocator,
+pub fn isHashValid(self: *const Self) !bool {
+    const generated_hash = try hashBlockData(
         self.timestamp,
         self.prev_hash,
         self.nonce,
@@ -118,7 +116,6 @@ const GenerateHashResult = struct {
 
 fn generateHash(
     io: Io,
-    allocator: Allocator,
     prev_block: *const Self,
     data: []const u8,
 ) !GenerateHashResult {
@@ -127,8 +124,7 @@ fn generateHash(
     while (true) : (nonce +%= 1) {
         const timestamp = Io.Timestamp.now(io, .real).toMilliseconds();
         difficulty = adjustDifficulty(prev_block, timestamp);
-        const generated_hash = try hashData(
-            allocator,
+        const generated_hash = try hashBlockData(
             timestamp,
             prev_block.hash,
             nonce,
@@ -154,28 +150,20 @@ fn adjustDifficulty(prev_block: *const Self, timestamp: i64) Difficulty {
     return prev_block.difficulty -| 1;
 }
 
-fn hashData(
-    allocator: std.mem.Allocator,
+fn hashBlockData(
     timestamp: Timestamp,
     prev_hash: h.Hash,
     nonce: Nonce,
     difficulty: Difficulty,
     data: []const u8,
 ) !h.Hash {
-    const s = try std.fmt.allocPrint(
-        allocator,
-        "{x}{x}{x}{x}{x}",
-        .{
-            &std.mem.toBytes(timestamp),
-            &prev_hash,
-            data,
-            &std.mem.toBytes(nonce),
-            &std.mem.toBytes(difficulty),
-        },
-    );
-    defer allocator.free(s);
-
-    return h.hash(s);
+    return h.hashMany(.{
+        &std.mem.toBytes(timestamp),
+        &prev_hash,
+        data,
+        &std.mem.toBytes(nonce),
+        &std.mem.toBytes(difficulty),
+    });
 }
 
 test "first mined block prev hash matches genesis hash" {
