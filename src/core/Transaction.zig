@@ -60,7 +60,7 @@ pub fn verify(self: *const Self, allocator: std.mem.Allocator) !bool {
     try self.printOutputs(&allocating.writer);
     const outputs = allocating.written();
     self.input.signature.verify(
-        &h.hash(outputs),
+        &h.hashOne(outputs),
         self.input.address,
     ) catch return false;
 
@@ -113,7 +113,7 @@ fn sign(io: std.Io, allocator: std.mem.Allocator, transaction: *Self, sender: *c
         .timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds(),
         .amount = sender.balance,
         .address = sender.public_key,
-        .signature = try sender.sign(h.hash(outputs)),
+        .signature = try sender.sign(h.hashOne(outputs)),
     };
 }
 
