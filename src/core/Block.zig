@@ -157,7 +157,7 @@ fn hashBlockData(
     difficulty: Difficulty,
     data: []const u8,
 ) h.Hash {
-    return h.hash(.{
+    return h.hash(&.{
         &std.mem.toBytes(timestamp),
         &prev_hash,
         data,
