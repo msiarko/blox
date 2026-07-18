@@ -194,20 +194,22 @@ pub fn update(
     state: AppState,
     json: []const u8,
 ) !void {
-    const p = try std.json.Value.jsonParse(allocator, json, .{});
-    switch (@as(MessageType, @enumFromInt(p.object.get("type").?.integer))) {
-        MessageType.blockchain => {
-            const parsed = std.json.parseFromSlice([]const BlockJson, allocator, p.object.get("data").?, .{}) catch |err| {
-                if (err == error.OutOfMemory) return err;
-                log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
-                return;
-            };
-            defer parsed.deinit();
-
-            const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
+    var payload = try std.json.parseFromSlice(
+        Payload,
+        allocator,
+        json,
+        .{
+            .allocate = .alloc_always,
+            .max_value_len = json.len,
+        },
+    );
+    defer payload.deinit();
+    switch (payload.value.type) {
+        .blockchain => {
+            const blocks: []Block = try allocator.alloc(Block, payload.value.data.len);
             defer allocator.free(blocks);
 
-            for (parsed.value, blocks) |*item, *block| {
+            for (payload.value.data, blocks) |*item, *block| {
                 block.* = item.toBlock() catch |err| {
                     log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
                     return;
@@ -224,8 +226,7 @@ pub fn update(
             };
             log.info("Chain replaced from peer update", .{});
         },
-        MessageType.transaction => return error.ToDo,
-        else => unreachable,
+        .transaction => return error.ToDo,
     }
 }
 
@@ -399,12 +400,12 @@ pub const TransactionJson = struct {
     outputs: []const Output,
 };
 
-const MessageType = enum {
+pub const MessageType = enum {
     blockchain,
     transaction,
 };
 
 const Payload = struct {
-    type: u8,
-    data: []const u8,
+    type: MessageType,
+    data: []const BlockJson,
 };
