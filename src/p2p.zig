@@ -194,43 +194,39 @@ pub fn update(
     state: AppState,
     json: []const u8,
 ) !void {
-    _ = io;
-    _ = allocator;
-    _ = state;
-    _ = json;
-    // const p = try std.json.Value.jsonParse(allocator, json, .{});
-    // switch (@as(MessageType, @enumFromInt(p.object.get("type").?.integer))) {
-    //     MessageType.blockchain => {
-    //         const parsed = std.json.parseFromSlice([]const BlockJson, allocator, p.object.get("data").?, .{}) catch |err| {
-    //             if (err == error.OutOfMemory) return err;
-    //             log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
-    //             return;
-    //         };
-    //         defer parsed.deinit();
+    const p = try std.json.Value.jsonParse(allocator, json, .{});
+    switch (@as(MessageType, @enumFromInt(p.object.get("type").?.integer))) {
+        MessageType.blockchain => {
+            const parsed = std.json.parseFromSlice([]const BlockJson, allocator, p.object.get("data").?, .{}) catch |err| {
+                if (err == error.OutOfMemory) return err;
+                log.warn("Received unparseable chain ({s}), ignoring", .{@errorName(err)});
+                return;
+            };
+            defer parsed.deinit();
 
-    //         const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
-    //         defer allocator.free(blocks);
+            const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
+            defer allocator.free(blocks);
 
-    //         for (parsed.value, blocks) |*item, *block| {
-    //             block.* = item.toBlock() catch |err| {
-    //                 log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
-    //                 return;
-    //             };
-    //         }
+            for (parsed.value, blocks) |*item, *block| {
+                block.* = item.toBlock() catch |err| {
+                    log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
+                    return;
+                };
+            }
 
-    //         var new_chain: Blockchain = try .fromSlice(allocator, blocks);
-    //         defer new_chain.deinit(allocator);
+            var new_chain: Blockchain = try .fromSlice(allocator, blocks);
+            defer new_chain.deinit(allocator);
 
-    //         state.replaceChain(io, &new_chain) catch |err| {
-    //             if (err == error.OutOfMemory) return err;
-    //             log.info("Did not replace chain ({s})", .{@errorName(err)});
-    //             return;
-    //         };
-    //         log.info("Chain replaced from peer update", .{});
-    //     },
-    //     MessageType.transaction => return error.ToDo,
-    //     else => unreachable,
-    // }
+            state.replaceChain(io, &new_chain) catch |err| {
+                if (err == error.OutOfMemory) return err;
+                log.info("Did not replace chain ({s})", .{@errorName(err)});
+                return;
+            };
+            log.info("Chain replaced from peer update", .{});
+        },
+        MessageType.transaction => return error.ToDo,
+        else => unreachable,
+    }
 }
 
 pub fn connectAll(
