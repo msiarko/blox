@@ -1,6 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const log = std.log;
 
 const Self = @This();
 
@@ -24,6 +25,18 @@ pub fn deinit(self: *Self, io: Io, allocator: Allocator) void {
     allocator.free(self.buffer);
     if (self.uri_buf) |b| allocator.free(b);
     self.* = undefined;
+}
+
+pub fn sendMessage(self: *Self, io: Io, allocator: Allocator, msg: []const u8) !void {
+    var old: [1][]const u8 = undefined;
+    const n = self.message_queue.get(io, &old, 0) catch 0;
+    for (old[0..n]) |stale| allocator.free(stale);
+    self.message_queue.putOne(io, msg) catch |err| {
+        var buf: [64]u8 = undefined;
+        const peer_str = self.print(&buf) catch "unknown";
+        log.warn("Failed to send chain update to peer {s}: {s}", .{ peer_str, @errorName(err) });
+        return err;
+    };
 }
 
 pub fn getHost(self: *const Self) ![]const u8 {
