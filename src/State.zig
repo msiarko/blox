@@ -9,6 +9,7 @@ const core = @import("core");
 const Blockchain = core.Blockchain;
 const Block = core.Blockchain.Block;
 const Peer = @import("Peer.zig");
+const p2p = @import("p2p.zig");
 
 const log = std.log.scoped(.state);
 
@@ -68,9 +69,11 @@ pub fn deinit(self: *Self, io: Io) void {
 
     var it = self.peers.iterator();
     while (it.next()) |entry| {
+        entry.value_ptr.*.message_queue.close(io);
         self.allocator.free(entry.key_ptr.*);
         self.allocator.destroy(entry.value_ptr);
     }
+
     self.peers.deinit();
     self.transaction_pool.deinit(self.allocator);
     self.chain.deinit(self.allocator);
@@ -145,17 +148,7 @@ pub fn sendToPeer(
     io: Io,
     peer: *Peer,
 ) !void {
-    var allocating = std.Io.Writer.Allocating.init(self.allocator);
-    defer allocating.deinit();
-
-    {
-        try self.lock.lock(io);
-        defer self.lock.unlock(io);
-        try self.chain.printJson(&allocating.writer);
-    }
-
-    const json = allocating.written();
-    const msg = try self.allocator.dupe(u8, json);
+    const msg = try self.createBlockchainMessage(io);
     errdefer self.allocator.free(msg);
 
     var old: [1][]const u8 = undefined;
@@ -190,23 +183,33 @@ pub fn broadcastChain(self: *Self, io: Io) !void {
         return;
     }
 
+    const msg = try self.createBlockchainMessage(io);
+    errdefer self.allocator.free(msg);
+
+    var group: std.Io.Group = .init;
+    errdefer group.cancel(io);
+
+    var it = self.peers.valueIterator();
+    while (it.next()) |peer_ptr| {
+        group.async(io, publish, .{ io, peer_ptr.*, msg });
+    }
+
+    try group.await(io);
+}
+
+fn createBlockchainMessage(self: *Self, io: Io) ![]const u8 {
     var allocating = std.Io.Writer.Allocating.init(self.allocator);
     defer allocating.deinit();
 
+    try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{p2p.MessageType.blockchain});
     {
         try self.lock.lock(io);
         defer self.lock.unlock(io);
         try self.chain.printJson(&allocating.writer);
     }
 
-    var group: std.Io.Group = .init;
-    errdefer group.cancel(io);
-
-    const json = try allocating.toOwnedSlice();
-    var it = self.peers.valueIterator();
-    while (it.next()) |p| {
-        group.async(io, publish, .{ io, p.*, json });
-    }
+    try allocating.writer.print("}}", .{});
+    return allocating.toOwnedSlice();
 }
 
 fn publish(
@@ -218,6 +221,6 @@ fn publish(
         var buf: [64]u8 = undefined;
         const peer_str = peer.print(&buf) catch "unknown";
         log.warn("Failed to send chain update to peer {s}: {s}", .{ peer_str, @errorName(err) });
-        return;
+        return error.Canceled;
     };
 }
