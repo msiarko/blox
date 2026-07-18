@@ -306,15 +306,9 @@ fn startPeerSession(
     var reader = stream.reader(io, &read_buf);
 
     var ws = try ClientWebSocket.connect(io, state, peer, &reader, &writer);
-
-    {
-        var drain_buf: [1][]const u8 = undefined;
-        const drained = peer.message_queue.get(io, &drain_buf, 0) catch 0;
-        for (drain_buf[0..drained]) |stale| allocator.free(stale);
-    }
     defer ws.flush() catch {};
 
-    var publish_task = try io.concurrent(publish, .{ io, allocator, &peer.message_queue, &ws });
+    var publish_task = try io.concurrent(publish, .{ io, &peer.message_queue, &ws });
     defer publish_task.cancel(io) catch {};
 
     try state.sendToPeer(io, peer);
@@ -344,13 +338,11 @@ fn startPeerSession(
 
 fn publish(
     io: Io,
-    allocator: Allocator,
     updates_queue: *Io.Queue([]const u8),
     ws: *ClientWebSocket,
 ) !void {
     while (true) {
         const msg = try updates_queue.getOne(io);
-        defer allocator.free(msg);
         try ws.writeMessage(msg, .text);
         try ws.flush();
     }

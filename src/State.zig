@@ -69,7 +69,7 @@ pub fn deinit(self: *Self, io: Io) void {
 
     var it = self.peers.iterator();
     while (it.next()) |entry| {
-        entry.value_ptr.*.message_queue.close(io);
+        entry.value_ptr.*.deinit(io, self.allocator);
         self.allocator.free(entry.key_ptr.*);
         self.allocator.destroy(entry.value_ptr);
     }
@@ -99,7 +99,12 @@ pub fn printTransactions(
     return self.transaction_pool.printJson(writer);
 }
 
-pub fn createTransaction(self: *Self, io: std.Io, recipient: []const u8, amount: f128) !void {
+pub fn createTransaction(
+    self: *Self,
+    io: std.Io,
+    recipient: []const u8,
+    amount: f128,
+) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
     var buf: [33]u8 = undefined;
@@ -151,11 +156,7 @@ pub fn sendToPeer(
     const msg = try self.createBlockchainMessage(io);
     errdefer self.allocator.free(msg);
 
-    var old: [1][]const u8 = undefined;
-    const n = peer.message_queue.get(io, &old, 0) catch 0;
-    for (old[0..n]) |stale| self.allocator.free(stale);
-
-    try peer.message_queue.putOne(io, msg);
+    try peer.sendMessage(io, self.allocator, msg);
 }
 
 pub fn createBlock(
@@ -191,7 +192,7 @@ pub fn broadcastChain(self: *Self, io: Io) !void {
 
     var it = self.peers.valueIterator();
     while (it.next()) |peer_ptr| {
-        group.async(io, publish, .{ io, peer_ptr.*, msg });
+        group.async(io, publish, .{ io, self.allocator, peer_ptr.*, msg });
     }
 
     try group.await(io);
@@ -214,13 +215,9 @@ fn createBlockchainMessage(self: *Self, io: Io) ![]const u8 {
 
 fn publish(
     io: std.Io,
+    allocator: Allocator,
     peer: *Peer,
-    json: []const u8,
+    msg: []const u8,
 ) std.Io.Cancelable!void {
-    peer.message_queue.putOne(io, json) catch |err| {
-        var buf: [64]u8 = undefined;
-        const peer_str = peer.print(&buf) catch "unknown";
-        log.warn("Failed to send chain update to peer {s}: {s}", .{ peer_str, @errorName(err) });
-        return error.Canceled;
-    };
+    peer.sendMessage(io, allocator, msg) catch return error.Canceled;
 }
