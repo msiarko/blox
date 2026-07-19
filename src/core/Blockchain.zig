@@ -99,21 +99,6 @@ pub fn replace(
     }
 }
 
-pub fn printJson(self: *const Self, writer: *std.Io.Writer) !void {
-    var stringify: std.json.Stringify = .{
-        .writer = writer,
-        .options = .{},
-    };
-
-    try stringify.beginArray();
-    for (0..self.blocks.len) |i| {
-        const b = self.blocks.get(i);
-        try b.jsonStringify(&stringify);
-    }
-
-    try stringify.endArray();
-}
-
 test "blockchain starts with genesis block" {
     const allocator = std.testing.allocator;
     var genesis_block = try Block.genesis(allocator);

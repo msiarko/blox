@@ -13,7 +13,11 @@ pub fn hash(data: []const []const u8) Hash {
     return hasher.finalResult();
 }
 
-fn repeatPattern(comptime T: type, comptime pattern: []const T, comptime n: usize) [pattern.len * n]u8 {
+fn repeatPattern(
+    comptime T: type,
+    comptime pattern: []const T,
+    comptime n: usize,
+) [pattern.len * n]u8 {
     var buf: [pattern.len * n]u8 = undefined;
     for (0..n) |i| {
         @memcpy(buf[i * pattern.len .. (i + 1) * pattern.len], pattern);
