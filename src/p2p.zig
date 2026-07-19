@@ -150,7 +150,14 @@ pub const ClientWebSocket = struct {
         try self.output.flush();
     }
 
-    pub fn readSmallMessage(self: *Self, buf: []u8) !Message {
+    pub const Header = struct {
+        opcode: Opcode,
+        is_masked: bool,
+        payload_len: usize,
+        mask_key: [4]u8,
+    };
+
+    pub fn readMessageHeader(self: *Self) !Header {
         var header: [2]u8 = undefined;
         try self.readExact(&header);
 
@@ -171,15 +178,19 @@ pub const ClientWebSocket = struct {
         var mask_key: [4]u8 = undefined;
         if (is_masked) try self.readExact(&mask_key);
 
-        if (payload_len > buf.len) return error.MessageTooLarge;
-        const payload = buf[0..payload_len];
-        try self.readExact(payload);
+        return .{
+            .opcode = opcode,
+            .is_masked = is_masked,
+            .payload_len = payload_len,
+            .mask_key = mask_key,
+        };
+    }
 
+    pub fn readMessagePayload(self: *Self, buf: []u8, is_masked: bool, mask_key: [4]u8) !void {
+        try self.readExact(buf);
         if (is_masked) {
-            for (payload, 0..) |*b, i| b.* ^= mask_key[i % 4];
+            for (buf, 0..) |*b, i| b.* ^= mask_key[i % 4];
         }
-
-        return .{ .opcode = opcode, .data = payload };
     }
 
     fn readExact(self: *Self, buf: []u8) !void {
@@ -313,17 +324,29 @@ fn startPeerSession(
 
     try state.sendToPeer(io, peer);
 
-    const msg_buf = try allocator.alloc(u8, 1024 * 1024);
+    var buffer_capacity: usize = 4096;
+    var msg_buf = try allocator.alloc(u8, buffer_capacity);
     defer allocator.free(msg_buf);
 
     while (true) {
-        const msg = try ws.readSmallMessage(msg_buf);
-        switch (msg.opcode) {
+        const header = try ws.readMessageHeader();
+
+        if (header.payload_len > buffer_capacity) {
+            var new_cap = buffer_capacity;
+            while (new_cap < header.payload_len) new_cap *= 2;
+            msg_buf = try allocator.realloc(msg_buf, new_cap);
+            buffer_capacity = new_cap;
+        }
+
+        const payload = msg_buf[0..header.payload_len];
+        try ws.readMessagePayload(payload, header.is_masked, header.mask_key);
+
+        switch (header.opcode) {
             .text => {
                 var buf: [128]u8 = undefined;
                 const peer_key = peer.print(&buf) catch "unknown";
                 log.info("Received chain update from peer {s}", .{peer_key});
-                try update(io, allocator, state, msg.data);
+                try update(io, allocator, state, payload);
             },
             .connection_close => {
                 var buf: [128]u8 = undefined;
