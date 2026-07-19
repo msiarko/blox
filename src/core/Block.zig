@@ -74,30 +74,6 @@ pub fn isHashValid(self: *const Self) bool {
     return std.mem.eql(u8, &generated_hash, &self.hash);
 }
 
-pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
-    try stringify.beginObject();
-
-    try stringify.objectField("timestamp");
-    try stringify.write(self.timestamp);
-
-    try stringify.objectField("prev_hash");
-    try stringify.write(std.fmt.bytesToHex(self.prev_hash, .lower)[0..]);
-
-    try stringify.objectField("hash");
-    try stringify.write(std.fmt.bytesToHex(self.hash, .lower)[0..]);
-
-    try stringify.objectField("nonce");
-    try stringify.write(self.nonce);
-
-    try stringify.objectField("difficulty");
-    try stringify.write(self.difficulty);
-
-    try stringify.objectField("data");
-    try stringify.write(self.data);
-
-    try stringify.endObject();
-}
-
 pub fn eql(self: *const Self, other: *const Self) bool {
     return self.timestamp == other.timestamp and
         std.mem.eql(u8, &self.prev_hash, &other.prev_hash) and

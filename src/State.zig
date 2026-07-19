@@ -9,7 +9,11 @@ const core = @import("core");
 const Blockchain = core.Blockchain;
 const Block = core.Blockchain.Block;
 const Peer = @import("Peer.zig");
+const Transaction = core.Transaction;
+const TransactionPool = core.TransactionPool;
+const Wallet = core.Wallet;
 const p2p = @import("p2p.zig");
+const MessageType = p2p.MessageType;
 
 const log = std.log.scoped(.state);
 
@@ -18,7 +22,7 @@ const Self = @This();
 allocator: Allocator,
 lock: Io.Mutex,
 chain: Blockchain,
-transaction_pool: core.TransactionPool,
+transaction_pool: TransactionPool,
 rand: std.Random,
 wallet: core.Wallet,
 peers: std.StringHashMap(*Peer),
@@ -86,7 +90,7 @@ pub fn printChain(
 ) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    return self.chain.printJson(writer);
+    return blockchainJson(&self.chain, writer);
 }
 
 pub fn printTransactions(
@@ -96,7 +100,7 @@ pub fn printTransactions(
 ) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    return self.transaction_pool.printJson(writer);
+    return transactionPoolJson(&self.transaction_pool, writer);
 }
 
 pub fn createTransaction(
@@ -202,11 +206,11 @@ fn createBlockchainMessage(self: *Self, io: Io) ![]const u8 {
     var allocating = std.Io.Writer.Allocating.init(self.allocator);
     defer allocating.deinit();
 
-    try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{p2p.MessageType.blockchain});
+    try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{MessageType.blockchain});
     {
         try self.lock.lock(io);
         defer self.lock.unlock(io);
-        try self.chain.printJson(&allocating.writer);
+        try blockchainJson(&self.chain, &allocating.writer);
     }
 
     try allocating.writer.print("}}", .{});
@@ -220,4 +224,108 @@ fn publish(
     msg: []const u8,
 ) std.Io.Cancelable!void {
     peer.sendMessage(io, allocator, msg) catch return error.Canceled;
+}
+
+fn blockchainJson(blockchain: *const Blockchain, writer: *std.Io.Writer) !void {
+    var stringify: std.json.Stringify = .{
+        .writer = writer,
+        .options = .{},
+    };
+
+    try stringify.beginArray();
+    for (0..blockchain.blocks.len) |i| {
+        const b = blockchain.blocks.get(i);
+        try blockJson(&b, &stringify);
+    }
+
+    try stringify.endArray();
+}
+
+fn blockJson(block: *const Block, stringify: *std.json.Stringify) !void {
+    try stringify.beginObject();
+
+    try stringify.objectField("timestamp");
+    try stringify.write(block.timestamp);
+
+    try stringify.objectField("prev_hash");
+    try stringify.write(std.fmt.bytesToHex(block.prev_hash, .lower)[0..]);
+
+    try stringify.objectField("hash");
+    try stringify.write(std.fmt.bytesToHex(block.hash, .lower)[0..]);
+
+    try stringify.objectField("nonce");
+    try stringify.write(block.nonce);
+
+    try stringify.objectField("difficulty");
+    try stringify.write(block.difficulty);
+
+    try stringify.objectField("data");
+    try stringify.write(block.data);
+
+    try stringify.endObject();
+}
+
+fn transactionPoolJson(pool: *const TransactionPool, writer: *std.Io.Writer) !void {
+    var stringify: std.json.Stringify = .{
+        .writer = writer,
+        .options = .{},
+    };
+
+    try stringify.beginArray();
+    var it = pool.transactions.valueIterator();
+    while (it.next()) |transaction| {
+        try transactionJson(transaction, &stringify);
+    }
+
+    try stringify.endArray();
+}
+
+fn transactionJson(transation: *const Transaction, stringify: *std.json.Stringify) !void {
+    try stringify.beginObject();
+
+    try stringify.objectField("id");
+    try stringify.write(transation.id);
+
+    try stringify.objectField("input");
+    try stringify.beginObject();
+    try stringify.objectField("timestamp");
+    try stringify.write(transation.input.timestamp);
+    try stringify.objectField("amount");
+    try stringify.write(transation.input.amount);
+    try stringify.objectField("address");
+    try stringify.write(std.fmt.bytesToHex(transation.input.address.toCompressedSec1(), .lower));
+    try stringify.objectField("signature");
+    try stringify.write(std.fmt.bytesToHex(transation.input.signature.toBytes(), .lower));
+    try stringify.endObject();
+
+    try stringify.objectField("outputs");
+    try stringify.beginArray();
+    for (transation.outputs.items) |*o| {
+        try stringify.beginObject();
+        try stringify.objectField("amount");
+        try stringify.write(o.amount);
+        try stringify.objectField("address");
+        try stringify.write(std.fmt.bytesToHex(o.address.toCompressedSec1(), .lower));
+        try stringify.endObject();
+    }
+    try stringify.endArray();
+
+    try stringify.endObject();
+}
+
+fn walletJson(wallet: *const Wallet, writer: *std.Io.Writer) !void {
+    var stringify: std.json.Stringify = .{
+        .writer = writer,
+        .options = .{},
+    };
+
+    try stringify.beginObject();
+
+    try stringify.objectField("balance");
+    try stringify.print("{d:.2}", .{wallet.balance});
+
+    try stringify.objectField("public_key");
+    try stringify.print("\"{x}\"", .{&wallet.public_key.toCompressedSec1()});
+
+    try stringify.endObject();
 }

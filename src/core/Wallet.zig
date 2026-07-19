@@ -56,23 +56,6 @@ pub fn createTransaction(
     }
 }
 
-pub fn printJson(self: *const Self, writer: *std.Io.Writer) !void {
-    var stringify: std.json.Stringify = .{
-        .writer = writer,
-        .options = .{},
-    };
-
-    try stringify.beginObject();
-
-    try stringify.objectField("balance");
-    try stringify.print("{d:.2}", .{self.balance});
-
-    try stringify.objectField("public_key");
-    try stringify.print("\"{x}\"", .{&self.public_key.toCompressedSec1()});
-
-    try stringify.endObject();
-}
-
 test "init without balance sets initial balance" {
     const wallet = Self.init(std.testing.io, null);
     try std.testing.expectEqual(options.initial_balance, wallet.balance);
