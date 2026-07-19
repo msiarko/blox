@@ -71,22 +71,6 @@ test "init public key is derived from key pair" {
     try std.testing.expectEqual(wallet.key_pair.public_key, wallet.public_key);
 }
 
-test "printJson outputs correct JSON" {
-    const wallet = Self.init(std.testing.io, 123.45);
-    var buffer: [256]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
-    try wallet.printJson(&writer);
-    const json = buffer[0..writer.end];
-    const expectedJson = try std.fmt.allocPrint(
-        std.testing.allocator,
-        "{{\"balance\":123.45,\"public_key\":\"{x}\"}}",
-        .{&wallet.public_key.toCompressedSec1()},
-    );
-    defer std.testing.allocator.free(expectedJson);
-
-    try std.testing.expectEqualStrings(expectedJson, json);
-}
-
 test "createTransaction adds new transaction to pool" {
     const wallet = Self.init(std.testing.io, 1000.0);
     var pool: TransactionPool = .init;

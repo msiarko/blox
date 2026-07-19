@@ -28,10 +28,13 @@ pub fn deinit(self: *Self, io: Io, allocator: Allocator) void {
 }
 
 pub fn sendMessage(self: *Self, io: Io, allocator: Allocator, msg: []const u8) !void {
+    const owned_msg = try allocator.dupe(u8, msg);
+    errdefer allocator.free(owned_msg);
+
     var old: [1][]const u8 = undefined;
     const n = self.message_queue.get(io, &old, 0) catch 0;
     for (old[0..n]) |stale| allocator.free(stale);
-    self.message_queue.putOne(io, msg) catch |err| {
+    self.message_queue.putOne(io, owned_msg) catch |err| {
         var buf: [64]u8 = undefined;
         const peer_str = self.print(&buf) catch "unknown";
         log.warn("Failed to send chain update to peer {s}: {s}", .{ peer_str, @errorName(err) });

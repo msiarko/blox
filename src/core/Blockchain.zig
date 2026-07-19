@@ -58,6 +58,13 @@ fn isValid(self: *const Self) !bool {
 pub fn fromSlice(allocator: Allocator, slice: []const Block) !Self {
     if (slice.len == 0) return error.EmptySlice;
     var blocks: std.MultiArrayList(Block) = try .initCapacity(allocator, slice.len);
+    errdefer {
+        for (0..blocks.len) |i| {
+            var b = blocks.get(i);
+            b.deinit(allocator);
+        }
+        blocks.deinit(allocator);
+    }
     for (slice) |item| {
         try blocks.append(allocator, .{
             .timestamp = item.timestamp,
@@ -87,14 +94,16 @@ pub fn replace(
     }
 
     for (self.blocks.len..chain.blocks.len) |i| {
-        const b = &chain.blocks.get(i);
+        const b = chain.blocks.get(i);
+        const data = try allocator.dupe(u8, b.data);
+        errdefer allocator.free(data);
         try self.blocks.append(allocator, .{
             .timestamp = b.timestamp,
             .prev_hash = b.prev_hash,
             .hash = b.hash,
             .nonce = b.nonce,
             .difficulty = b.difficulty,
-            .data = try allocator.dupe(u8, b.data),
+            .data = data,
         });
     }
 }
@@ -213,4 +222,56 @@ test "blockchain not replaces if incoming chain is invalid" {
     @constCast(last_block.data)[0] = 'C';
 
     try std.testing.expectError(error.InvalidChain, initial.replace(allocator, &blockchain));
+}
+
+test "fromSlice frees memory on OOM" {
+    const allocator = std.testing.allocator;
+    var genesis_block = try Block.genesis(allocator);
+    defer genesis_block.deinit(allocator);
+
+    const data1 = "Block 1 data";
+    var block1 = try Block.init(std.testing.io, allocator, &genesis_block, data1);
+    defer block1.deinit(allocator);
+
+    const data2 = "Block 2 data";
+    var block2 = try Block.init(std.testing.io, allocator, &block1, data2);
+    defer block2.deinit(allocator);
+
+    const blocks_slice = &[_]Block{ genesis_block, block1, block2 };
+
+    var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 3 });
+    const failing_alloc = failing.allocator();
+
+    _ = fromSlice(failing_alloc, blocks_slice) catch |err| {
+        try std.testing.expectEqual(error.OutOfMemory, err);
+        return;
+    };
+    return error.TestExpectedOomFailure;
+}
+
+test "replace frees memomy on OOM during append" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    var initial = try init(allocator);
+    defer initial.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < 7) : (i += 1) {
+        try initial.add(io, allocator, "dummy block");
+    }
+
+    var blockchain = try init(allocator);
+    defer blockchain.deinit(allocator);
+    try blockchain.replace(allocator, &initial);
+    try blockchain.add(io, allocator, "dummy block");
+
+    var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 1 });
+    const failing_alloc = failing.allocator();
+
+    _ = initial.replace(failing_alloc, &blockchain) catch |err| {
+        try std.testing.expectEqual(error.OutOfMemory, err);
+        return;
+    };
+    return error.TestExpectedOomFailure;
 }

@@ -50,7 +50,6 @@ pub fn init(
         var it = self.peers.iterator();
         while (it.next()) |entry| {
             allocator.free(entry.key_ptr.*);
-            allocator.destroy(entry.value_ptr);
         }
         self.peers.deinit();
         self.chain.deinit(allocator);
@@ -75,7 +74,6 @@ pub fn deinit(self: *Self, io: Io) void {
     while (it.next()) |entry| {
         entry.value_ptr.*.deinit(io, self.allocator);
         self.allocator.free(entry.key_ptr.*);
-        self.allocator.destroy(entry.value_ptr);
     }
 
     self.peers.deinit();
@@ -136,7 +134,9 @@ pub fn addPeer(
 
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    try self.peers.put(owned_key, peer);
+    if (try self.peers.fetchPut(owned_key, peer)) |old| {
+        self.allocator.free(old.key);
+    }
 }
 
 pub fn removePeer(
@@ -158,7 +158,7 @@ pub fn sendToPeer(
     peer: *Peer,
 ) !void {
     const msg = try self.createBlockchainMessage(io);
-    errdefer self.allocator.free(msg);
+    defer self.allocator.free(msg);
 
     try peer.sendMessage(io, self.allocator, msg);
 }
@@ -189,7 +189,7 @@ pub fn broadcastChain(self: *Self, io: Io) !void {
     }
 
     const msg = try self.createBlockchainMessage(io);
-    errdefer self.allocator.free(msg);
+    defer self.allocator.free(msg);
 
     var group: std.Io.Group = .init;
     errdefer group.cancel(io);
@@ -328,4 +328,65 @@ fn walletJson(wallet: *const Wallet, writer: *std.Io.Writer) !void {
     try stringify.print("\"{x}\"", .{&wallet.public_key.toCompressedSec1()});
 
     try stringify.endObject();
+}
+
+test "walletJson outputs correct JSON" {
+    const wallet = Wallet.init(std.testing.io, 123.45);
+    var buffer: [256]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try walletJson(&wallet, &writer);
+    const json = buffer[0..writer.end];
+    const expectedJson = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "{{\"balance\":123.45,\"public_key\":\"{x}\"}}",
+        .{&wallet.public_key.toCompressedSec1()},
+    );
+    defer std.testing.allocator.free(expectedJson);
+
+    try std.testing.expectEqualStrings(expectedJson, json);
+}
+
+test "addPeer frees old entry on duplicate" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const self_address = try std.Io.net.IpAddress.parse("127.0.0.1", 8080);
+    var self_peer = try Peer.initFromAddress(allocator, self_address);
+    defer self_peer.deinit(io, allocator);
+
+    var state = try init(io, allocator, self_peer, &[_]Peer{});
+    defer {
+        var it = state.peers.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+        }
+        state.peers.clearAndFree(allocator);
+        state.deinit(io);
+    }
+
+    const peer_address = try std.Io.net.IpAddress.parse("127.0.0.1", 9090);
+    var peer1 = try Peer.initFromAddress(allocator, peer_address);
+    defer peer1.deinit(io, allocator);
+
+    try state.addPeer(io, &peer1);
+    try state.addPeer(io, &peer1);
+}
+
+test "State.deinit does'n crash" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const self_address = try std.Io.net.IpAddress.parse("127.0.0.1", 8080);
+    var self_peer = try Peer.initFromAddress(allocator, self_address);
+    defer self_peer.deinit(io, allocator);
+
+    var state = try init(io, allocator, self_peer, &[_]Peer{});
+
+    const peer_address = try std.Io.net.IpAddress.parse("127.0.0.1", 9090);
+    var peer1 = try Peer.initFromAddress(allocator, peer_address);
+    defer peer1.deinit(io, allocator);
+
+    try state.addPeer(io, &peer1);
+
+    state.deinit(io);
 }

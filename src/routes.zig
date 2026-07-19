@@ -52,6 +52,7 @@ fn webSockets(
     log.info("Peer {s} connected", .{peer_key});
     var sub_task = try ctx.io.concurrent(subscribe, .{
         ctx.io,
+        state.allocator,
         &peer.message_queue,
         &ws,
     });
@@ -83,11 +84,13 @@ fn webSockets(
 
 fn subscribe(
     io: Io,
+    allocator: Allocator,
     peer_queue: *std.Io.Queue([]const u8),
     ws: *WebSocket,
 ) !void {
     while (true) {
         const update = try peer_queue.getOne(io);
+        defer allocator.free(update);
         try ws.writeMessage(update, .text);
         try ws.flush();
     }
