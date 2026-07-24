@@ -1,13 +1,7 @@
 const std = @import("std");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
-const Environment = enum {
-    dev,
-    prod,
-};
-
 pub fn build(b: *std.Build) void {
-    const env = b.option(Environment, "env", "Environment to build for") orelse .dev;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -40,12 +34,10 @@ pub fn build(b: *std.Build) void {
     const volt = b.dependency("volt", .{
         .target = target,
         .optimize = optimize,
+        .extract_enabled = true,
     });
     mod.addImport("volt", volt.module("volt"));
 
-    const mod_options = b.addOptions();
-    mod_options.addOption(Environment, "environment", env);
-    mod.addOptions("options", mod_options);
     const exe = b.addExecutable(.{
         .name = "blox",
         .root_module = b.createModule(.{

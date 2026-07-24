@@ -9,6 +9,7 @@ const volt = @import("volt");
 const State = @import("State.zig");
 const Peer = @import("Peer.zig");
 const p2p = @import("p2p.zig");
+const WebSocketExtractor = volt.extract.WebSocket;
 
 const log = std.log.scoped(.routes);
 
@@ -38,7 +39,8 @@ fn webSockets(
         return .text(ctx.req_arena, .bad_request, "Missing Blox-Peer-Uri header", null);
     };
 
-    var ws = try volt.extract.WebSocket.init(ctx);
+    const ws_ext = WebSocketExtractor.fromContext(ctx);
+    var ws = ws_ext.result catch |err| return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
     defer ws.flush() catch {};
 
     var peer = try Peer.parse(state.allocator, peer_uri);
