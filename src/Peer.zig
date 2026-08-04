@@ -65,7 +65,7 @@ pub fn getAddress(self: *const Self) !Io.net.IpAddress {
 pub fn print(self: *const Self, buffer: []u8) ![]u8 {
     const host = try self.getHost();
     const port = self.getPort();
-    return std.fmt.bufPrint(buffer, "{s}:{d}", .{ host, port });
+    return std.mem.print(buffer, "{s}:{d}", .{ host, port });
 }
 
 pub fn parse(allocator: Allocator, peer_uri: []const u8) !Self {
@@ -74,8 +74,7 @@ pub fn parse(allocator: Allocator, peer_uri: []const u8) !Self {
 
 pub fn initFromAddress(allocator: Allocator, address: Io.net.IpAddress) !Self {
     const ip = address.ip4.bytes;
-    const uri_string = try std.fmt.allocPrint(
-        allocator,
+    const uri_string = try allocator.print(
         "ws://{d}.{d}.{d}.{d}:{d}",
         .{ ip[0], ip[1], ip[2], ip[3], address.getPort() },
     );

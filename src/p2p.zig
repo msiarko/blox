@@ -117,7 +117,7 @@ pub const ClientWebSocket = struct {
         const path = if (path_raw.len == 0) "/ws" else path_raw;
 
         var handshake_buf: [512]u8 = undefined;
-        const handshake = try std.fmt.bufPrint(
+        const handshake = try std.mem.print(
             &handshake_buf,
             "GET {s} HTTP/1.1\r\n" ++
                 "Host: {s}\r\n" ++

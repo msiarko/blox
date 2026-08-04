@@ -12,7 +12,7 @@ pub fn genV4(rand: Random) Guid {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     var buf: Guid = undefined;
-    _ = std.fmt.bufPrint(&buf, "{x}-{x}-{x}-{x}-{x}", .{
+    _ = std.mem.print(&buf, "{x}-{x}-{x}-{x}-{x}", .{
         bytes[0..4],
         bytes[4..6],
         bytes[6..8],

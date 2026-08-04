@@ -336,8 +336,7 @@ test "walletJson outputs correct JSON" {
     var writer = std.Io.Writer.fixed(&buffer);
     try walletJson(&wallet, &writer);
     const json = buffer[0..writer.end];
-    const expectedJson = try std.fmt.allocPrint(
-        std.testing.allocator,
+    const expectedJson = try std.testing.allocator.print(
         "{{\"balance\":123.45,\"public_key\":\"{x}\"}}",
         .{&wallet.public_key.toCompressedSec1()},
     );
