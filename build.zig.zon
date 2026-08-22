@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.17.0-dev.1454+5faa79730",
     .dependencies = .{
         .volt = .{
-            .url = "git+https://github.com/msiarko/volt#115ea35c083c7a886faf515145d66428d13dc0ba",
-            .hash = "volt-0.0.10-ZvV_WalFAgAlxy9T1_shCUxX_NpkfnWRTYX4d4nvZDoO",
+            .url = "git+https://github.com/msiarko/volt#e34a9fd5a8313d5b3b2eafdf46a85b75beef666a",
+            .hash = "volt-0.0.11-ZvV_WSe3AgDZm8VJSDPB-xBJncWkSzK51M2Hslzr6top",
         },
     },
     .paths = .{
