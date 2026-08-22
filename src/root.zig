@@ -42,7 +42,7 @@ pub fn run(
     var router = try routes.router(allocator, &state);
     defer router.deinit(allocator);
 
-    try server.listen(routes.AppState, allocator, address, &router);
+    try server.listen(allocator, address, &router);
 }
 
 fn getPeers(allocator: Allocator, env_map: *Environ.Map) ![]Peer {
