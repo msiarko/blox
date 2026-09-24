@@ -5,13 +5,12 @@ const Timestamp = Io.Timestamp;
 const DefaultPrng = std.Random.DefaultPrng;
 const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 
-const core = @import("core");
-const Blockchain = core.Blockchain;
-const Block = core.Blockchain.Block;
+const Blockchain = @import("core/Blockchain.zig");
+const Block = Blockchain.Block;
 const Peer = @import("Peer.zig");
-const Transaction = core.Transaction;
-const TransactionPool = core.TransactionPool;
-const Wallet = core.Wallet;
+const Transaction = @import("core/Transaction.zig");
+const TransactionPool = @import("core/TransactionPool.zig");
+const Wallet = @import("core/Wallet.zig");
 const p2p = @import("p2p.zig");
 const MessageType = p2p.MessageType;
 
@@ -24,7 +23,7 @@ lock: Io.Mutex,
 chain: Blockchain,
 transaction_pool: TransactionPool,
 rand: std.Random,
-wallet: core.Wallet,
+wallet: Wallet,
 peers: std.StringHashMap(*Peer),
 self_peer: Peer,
 broadcast_group: std.Io.Group = .init,
@@ -333,7 +332,7 @@ fn walletJson(wallet: *const Wallet, writer: *std.Io.Writer) !void {
 test "walletJson outputs correct JSON" {
     const wallet = Wallet.init(std.testing.io, 123.45);
     var buffer: [256]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
+    var writer = Io.Writer.fixed(&buffer);
     try walletJson(&wallet, &writer);
     const json = buffer[0..writer.end];
     const expectedJson = try std.testing.allocator.print(
@@ -349,7 +348,7 @@ test "addPeer frees old entry on duplicate" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    const self_address = try std.Io.net.IpAddress.parse("127.0.0.1", 8080);
+    const self_address = try Io.net.IpAddress.parse("127.0.0.1", 8080);
     var self_peer = try Peer.initFromAddress(allocator, self_address);
     defer self_peer.deinit(io, allocator);
 
@@ -359,33 +358,33 @@ test "addPeer frees old entry on duplicate" {
         while (it.next()) |entry| {
             allocator.free(entry.key_ptr.*);
         }
-        state.peers.clearAndFree(allocator);
+        state.peers.clearAndFree();
         state.deinit(io);
     }
 
-    const peer_address = try std.Io.net.IpAddress.parse("127.0.0.1", 9090);
-    var peer1 = try Peer.initFromAddress(allocator, peer_address);
-    defer peer1.deinit(io, allocator);
+    const peer_address = try Io.net.IpAddress.parse("127.0.0.1", 9090);
+    var peer = try Peer.initFromAddress(allocator, peer_address);
+    defer peer.deinit(io, allocator);
 
-    try state.addPeer(io, &peer1);
-    try state.addPeer(io, &peer1);
+    try state.addPeer(io, &peer);
+    try state.addPeer(io, &peer);
 }
 
-test "State.deinit does'n crash" {
+test "deinit doesn't crash" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
 
-    const self_address = try std.Io.net.IpAddress.parse("127.0.0.1", 8080);
+    const self_address = try Io.net.IpAddress.parse("127.0.0.1", 8080);
     var self_peer = try Peer.initFromAddress(allocator, self_address);
     defer self_peer.deinit(io, allocator);
 
     var state = try init(io, allocator, self_peer, &[_]Peer{});
 
-    const peer_address = try std.Io.net.IpAddress.parse("127.0.0.1", 9090);
-    var peer1 = try Peer.initFromAddress(allocator, peer_address);
-    defer peer1.deinit(io, allocator);
+    const peer_address = try Io.net.IpAddress.parse("127.0.0.1", 9090);
+    var peer = try Peer.initFromAddress(allocator, peer_address);
+    defer peer.deinit(io, allocator);
 
-    try state.addPeer(io, &peer1);
+    try state.addPeer(io, &peer);
 
     state.deinit(io);
 }

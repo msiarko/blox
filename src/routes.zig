@@ -3,7 +3,6 @@ const WebSocket = std.http.Server.WebSocket;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const core = @import("core");
 const volt = @import("volt");
 
 const State = @import("State.zig");
