@@ -6,9 +6,9 @@ const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 const PublicKey = ecdsa.PublicKey;
 const Signature = ecdsa.Signature;
 
-const core = @import("core");
-const Blockchain = core.Blockchain;
-const Block = core.Blockchain.Block;
+const Blockchain = @import("core/Blockchain.zig");
+const Block = Blockchain.Block;
+const uuid = @import("core/uuid.zig");
 
 const Peer = @import("Peer.zig");
 const AppState = @import("routes.zig").AppState;
@@ -412,7 +412,7 @@ pub const TransactionJson = struct {
         address: [PublicKey.compressed_sec1_encoded_length]u8,
     };
 
-    id: [core.uuid.length]u8,
+    id: [uuid.length]u8,
     input: Input,
     outputs: []const Output,
 };
