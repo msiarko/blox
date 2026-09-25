@@ -249,7 +249,77 @@ pub fn broadcastChain(self: *Self, io: Io) !void {
 
     try group.await(io);
 }
+pub fn appendBlock(
+    self: *Self,
+    io: Io,
+    block: *const Block,
+) !void {
+    try self.lock.lock(io);
+    defer self.lock.unlock(io);
+    
+    const last = try self.chain.getLastBlock();
+    if (!std.mem.eql(u8, &block.prev_hash, &last.hash)) return error.InvalidChain;
+    
+    // Validate block hash properly
+    if (!block.isHashValid()) return error.InvalidChain;
+    
+    // It's valid and links properly, append it
+    const data = try self.allocator.dupe(u8, block.data);
+    errdefer self.allocator.free(data);
+    
+    try self.chain.blocks.append(self.allocator, .{
+        .timestamp = block.timestamp,
+        .prev_hash = block.prev_hash,
+        .hash = block.hash,
+        .nonce = block.nonce,
+        .difficulty = block.difficulty,
+        .data = data,
+    });
+    
+    if (!try self.chain.isValid(self.allocator)) {
+        const popped = self.chain.blocks.pop().?;
+        self.allocator.free(popped.data);
+        return error.InvalidChain;
+    }
+}
 
+pub fn broadcastNewBlock(self: *Self, io: Io) !void {
+    if (self.peers.count() == 0) return;
+
+    var allocating = std.Io.Writer.Allocating.init(self.allocator);
+    defer allocating.deinit();
+
+    try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{MessageType.new_block});
+    {
+        try self.lock.lock(io);
+        defer self.lock.unlock(io);
+        const last = try self.chain.getLastBlock();
+        var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
+        try blockJson(&last, &stringify);
+    }
+    try allocating.writer.print("}}", .{});
+    const msg = try allocating.toOwnedSlice();
+    defer self.allocator.free(msg);
+
+    var group: std.Io.Group = .init;
+    errdefer group.cancel(io);
+    var it = self.peers.valueIterator();
+    while (it.next()) |peer_ptr| group.async(io, publish, .{ io, self.allocator, peer_ptr.*, msg });
+    try group.await(io);
+}
+
+pub fn broadcastRequestChain(self: *Self, io: Io) !void {
+    if (self.peers.count() == 0) return;
+
+    const msg = try std.fmt.allocPrint(self.allocator, "{{\"type\": {d}}}", .{MessageType.request_chain});
+    defer self.allocator.free(msg);
+
+    var group: std.Io.Group = .init;
+    errdefer group.cancel(io);
+    var it = self.peers.valueIterator();
+    while (it.next()) |peer_ptr| group.async(io, publish, .{ io, self.allocator, peer_ptr.*, msg });
+    try group.await(io);
+}
 fn createBlockchainMessage(self: *Self, io: Io) ![]const u8 {
     var allocating = std.Io.Writer.Allocating.init(self.allocator);
     defer allocating.deinit();

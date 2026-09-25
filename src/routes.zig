@@ -107,7 +107,7 @@ fn createBlock(
     state: AppState,
 ) !volt.Response {
     try state.mineBlock(ctx.io);
-    try state.broadcastChain(ctx.io);
+    try state.broadcastNewBlock(ctx.io);
     return .ok(ctx.req_arena, "Block mined successfully", null);
 }
 

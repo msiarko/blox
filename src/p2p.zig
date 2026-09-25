@@ -205,22 +205,27 @@ pub fn update(
     state: AppState,
     json: []const u8,
 ) !void {
-    var payload = try std.json.parseFromSlice(
-        Payload,
-        allocator,
-        json,
-        .{
-            .allocate = .alloc_always,
-            .max_value_len = json.len,
-        },
-    );
-    defer payload.deinit();
-    switch (payload.value.type) {
+    var ast = try std.json.parseFromSlice(std.json.Value, allocator, json, .{});
+    defer ast.deinit();
+
+    if (ast.value != .object) return error.InvalidPayload;
+    const obj = ast.value.object;
+
+    const type_val = obj.get("type") orelse return error.InvalidPayload;
+    if (type_val != .integer) return error.InvalidPayload;
+
+    const msg_type: MessageType = @enumFromInt(type_val.integer);
+
+    switch (msg_type) {
         .blockchain => {
-            const blocks: []Block = try allocator.alloc(Block, payload.value.data.len);
+            const data_val = obj.get("data") orelse return error.InvalidPayload;
+            const parsed = try std.json.parseFromValue([]const BlockJson, allocator, data_val, .{});
+            defer parsed.deinit();
+
+            const blocks: []Block = try allocator.alloc(Block, parsed.value.len);
             defer allocator.free(blocks);
 
-            for (payload.value.data, blocks) |*item, *block| {
+            for (parsed.value, blocks) |*item, *block| {
                 block.* = item.toBlock() catch |err| {
                     log.warn("Peer sent block with invalid fields ({s}), ignoring chain", .{@errorName(err)});
                     return;
@@ -236,6 +241,28 @@ pub fn update(
                 return;
             };
             log.info("Chain replaced from peer update", .{});
+        },
+        .new_block => {
+            const data_val = obj.get("data") orelse return error.InvalidPayload;
+            const parsed = try std.json.parseFromValue(BlockJson, allocator, data_val, .{});
+            defer parsed.deinit();
+
+            var block = parsed.value.toBlock() catch |err| {
+                log.warn("Peer sent invalid block ({s})", .{@errorName(err)});
+                return;
+            };
+            defer block.deinit(allocator);
+
+            state.appendBlock(io, &block) catch |err| {
+                if (err == error.OutOfMemory) return err;
+                log.info("Could not append block ({s}), requesting full chain...", .{@errorName(err)});
+                try state.broadcastRequestChain(io);
+                return;
+            };
+            log.info("Appended new block from peer", .{});
+        },
+        .request_chain => {
+            try state.broadcastChain(io);
         },
         .transaction => return error.ToDo,
     }
@@ -402,9 +429,6 @@ pub const BlockJson = struct {
 pub const MessageType = enum {
     blockchain,
     transaction,
-};
-
-const Payload = struct {
-    type: MessageType,
-    data: []const BlockJson,
+    new_block,
+    request_chain,
 };

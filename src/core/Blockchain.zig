@@ -43,7 +43,7 @@ pub fn getLastBlock(self: *const Self) !Block {
     return self.blocks.get(self.blocks.len - 1);
 }
 
-fn isValid(self: *const Self, allocator: Allocator) !bool {
+pub fn isValid(self: *const Self, allocator: Allocator) !bool {
     if (self.blocks.len == 0) return false;
     
     const options = @import("options");
