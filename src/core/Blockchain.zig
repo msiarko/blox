@@ -255,15 +255,12 @@ test "replace frees memomy on OOM during append" {
 
     var initial = try init(allocator);
     defer initial.deinit(allocator);
-
-    var i: usize = 0;
-    while (i < 7) : (i += 1) {
-        try initial.add(io, allocator, "dummy block");
-    }
+    initial.blocks.shrinkAndFree(allocator, 1); // Force append to allocate
 
     var blockchain = try init(allocator);
     defer blockchain.deinit(allocator);
-    try blockchain.replace(allocator, &initial);
+    
+    // Just mine 1 block to make blockchain longer than initial
     try blockchain.add(io, allocator, "dummy block");
 
     var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 1 });

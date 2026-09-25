@@ -10,7 +10,7 @@ const options = @import("options");
 pub const Hash = h.Hash;
 const Timestamp = i64;
 const Nonce = u64;
-const Difficulty = u4;
+const Difficulty = u16;
 
 const Self = @This();
 
@@ -90,6 +90,20 @@ const GenerateHashResult = struct {
     difficulty: Difficulty,
 };
 
+fn checkDifficulty(hash: h.Hash, difficulty: Difficulty) bool {
+    const zero_bytes = difficulty / 8;
+    const zero_bits = difficulty % 8;
+    if (zero_bytes > hash.len) return false;
+    if (zero_bytes > 0) {
+        if (!std.mem.allEqual(u8, hash[0..zero_bytes], 0)) return false;
+    }
+    if (zero_bits > 0 and zero_bytes < hash.len) {
+        const mask: u8 = @as(u8, 0xFF) << @intCast(8 - zero_bits);
+        if ((hash[zero_bytes] & mask) != 0) return false;
+    }
+    return true;
+}
+
 fn generateHash(
     io: Io,
     prev_block: *const Self,
@@ -108,7 +122,7 @@ fn generateHash(
             data,
         );
 
-        if (std.mem.allEqual(u8, generated_hash[0..difficulty], 0)) {
+        if (checkDifficulty(generated_hash, difficulty)) {
             return .{
                 .hash = generated_hash,
                 .nonce = nonce,

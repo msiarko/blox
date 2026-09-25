@@ -7,11 +7,11 @@ const h = @import("hash.zig");
 
 const Self = @This();
 
-balance: f128,
+balance: u64,
 key_pair: ecdsa.KeyPair,
 public_key: ecdsa.PublicKey,
 
-pub fn init(io: std.Io, balance: ?f128) Self {
+pub fn init(io: std.Io, balance: ?u64) Self {
     const key_pair = ecdsa.KeyPair.generate(io);
     return .{
         .balance = balance orelse options.initial_balance,
@@ -30,19 +30,29 @@ pub fn createTransaction(
     allocator: std.mem.Allocator,
     rand: std.Random,
     recipient: ecdsa.PublicKey,
-    amount: f128,
+    amount: u64,
     transaction_pool: *TransactionPool,
 ) !void {
     if (amount > self.balance) return error.AmountExceedsBalance;
     const transaction = transaction_pool.getTransaction(self.public_key);
     if (transaction) |tx| {
-        try tx.update(
+        // Create a copy to update, to avoid in-place mutation of the pool's shared transaction.
+        // Wait, if we create a copy, we need to clone the outputs array.
+        var new_tx: Transaction = .{
+            .id = tx.id,
+            .input = tx.input,
+            .outputs = try tx.outputs.clone(allocator),
+        };
+        errdefer new_tx.outputs.deinit(allocator);
+
+        try new_tx.update(
             io,
             allocator,
             self,
             recipient,
             amount,
         );
+        try transaction_pool.addOrUpdate(allocator, new_tx);
     } else {
         const tx = try Transaction.init(
             io,
@@ -62,8 +72,8 @@ test "init without balance sets initial balance" {
 }
 
 test "init with balance sets balance" {
-    const wallet = Self.init(std.testing.io, 100.0);
-    try std.testing.expectEqual(100.0, wallet.balance);
+    const wallet = Self.init(std.testing.io, 100);
+    try std.testing.expectEqual(100, wallet.balance);
 }
 
 test "init public key is derived from key pair" {
@@ -72,8 +82,8 @@ test "init public key is derived from key pair" {
 }
 
 test "createTransaction adds new transaction to pool" {
-    const wallet = Self.init(std.testing.io, 1000.0);
-    var pool: TransactionPool = .init;
+    const wallet = Self.init(std.testing.io, 1000);
+    var pool: TransactionPool = .init(std.testing.allocator);
     defer pool.deinit(std.testing.allocator);
 
     const recipient_key_pair = ecdsa.KeyPair.generate(std.testing.io);
@@ -85,23 +95,22 @@ test "createTransaction adds new transaction to pool" {
         std.testing.allocator,
         default_rand.random(),
         recipient_public_key,
-        200.0,
+        200,
         &pool,
     );
 
     const transaction = pool.getTransaction(wallet.public_key);
     try std.testing.expect(transaction != null);
-    try std.testing.expectEqual(200.0, transaction.?.outputs.items[1].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &recipient_public_key.toUncompressedSec1(),
-        &transaction.?.outputs.items[1].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(200, transaction.?.outputs.items[1].amount);
+    
+    const rec_addr = recipient_public_key.toUncompressedSec1();
+    const out_addr = transaction.?.outputs.items[1].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &rec_addr, &out_addr);
 }
 
 test "createTransaction updates existing transaction in pool" {
-    const wallet = Self.init(std.testing.io, 1000.0);
-    var pool: TransactionPool = .init;
+    const wallet = Self.init(std.testing.io, 1000);
+    var pool: TransactionPool = .init(std.testing.allocator);
     defer pool.deinit(std.testing.allocator);
 
     const recipient_key_pair = ecdsa.KeyPair.generate(std.testing.io);
@@ -113,31 +122,30 @@ test "createTransaction updates existing transaction in pool" {
         std.testing.allocator,
         default_rand.random(),
         recipient_public_key,
-        200.0,
+        200,
         &pool,
     );
 
     var transaction = pool.getTransaction(wallet.public_key);
     try std.testing.expectEqual(2, transaction.?.outputs.items.len);
-    try std.testing.expectEqual(800.0, transaction.?.outputs.items[0].amount);
+    try std.testing.expectEqual(800, transaction.?.outputs.items[0].amount);
 
     try wallet.createTransaction(
         std.testing.io,
         std.testing.allocator,
         default_rand.random(),
         recipient_public_key,
-        300.0,
+        300,
         &pool,
     );
 
     transaction = pool.getTransaction(wallet.public_key);
     try std.testing.expect(transaction != null);
     try std.testing.expectEqual(3, transaction.?.outputs.items.len);
-    try std.testing.expectEqual(500.0, transaction.?.outputs.items[0].amount);
-    try std.testing.expectEqual(300.0, transaction.?.outputs.items[2].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &recipient_public_key.toUncompressedSec1(),
-        &transaction.?.outputs.items[2].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(500, transaction.?.outputs.items[0].amount);
+    try std.testing.expectEqual(300, transaction.?.outputs.items[2].amount);
+    
+    const rec_addr = recipient_public_key.toUncompressedSec1();
+    const out_addr = transaction.?.outputs.items[2].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &rec_addr, &out_addr);
 }

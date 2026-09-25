@@ -38,10 +38,8 @@ fn webSockets(
         return .text(ctx.req_arena, .bad_request, "Missing Blox-Peer-Uri header", null);
     };
 
-    const ws_ext = WebSocketExtractor.fromContext(ctx);
-    var ws = ws_ext.result catch |err| return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
-    defer ws.flush() catch {};
-
+    const ws_ext = try WebSocketExtractor.init(ctx);
+    var ws = ws_ext.socket;
     var peer = try Peer.parse(state.allocator, peer_uri);
     defer peer.deinit(ctx.io, state.allocator);
 
@@ -109,16 +107,7 @@ fn createBlock(
     state: AppState,
     mine_request: volt.extract.Json(MineRequest),
 ) !volt.Response {
-    const payload = mine_request.result catch |err| {
-        if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and
-            !isMemberOfErrorSet(std.mem.Allocator.Error, err))
-        {
-            return .text(ctx.req_arena, .bad_request, @errorName(err), null);
-        }
-
-        return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
-    };
-
+    const payload = mine_request.value;
     try state.createBlock(ctx.io, payload.data);
     try state.broadcastChain(ctx.io);
     return .ok(ctx.req_arena, "Block mined successfully", null);
@@ -136,16 +125,7 @@ fn createTransaction(
     state: AppState,
     transaction_request: volt.extract.Json(TransactionRequest),
 ) !volt.Response {
-    const payload = transaction_request.result catch |err| {
-        if (isMemberOfErrorSet(std.json.ParseError(std.json.Scanner), err) and
-            !isMemberOfErrorSet(std.mem.Allocator.Error, err))
-        {
-            return .text(ctx.req_arena, .bad_request, @errorName(err), null);
-        }
-
-        return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
-    };
-
+    const payload = transaction_request.value;
     state.createTransaction(ctx.io, payload.recipient, payload.amount) catch |err| {
         if (err == error.AmountExceedsBalance) return .text(ctx.req_arena, .unprocessable_entity, @errorName(err), null);
         return .text(ctx.req_arena, .internal_server_error, @errorName(err), null);
@@ -154,22 +134,11 @@ fn createTransaction(
     return .ok(ctx.req_arena, "Transaction created successfully", null);
 }
 
-fn isMemberOfErrorSet(comptime T: type, err: anyerror) bool {
-    const info = @typeInfo(T);
-    if (info != .error_set) @compileError("T should be an error set");
-
-    const error_names = info.error_set.error_names orelse return false;
-    inline for (error_names) |error_name| {
-        if (err == @field(T, error_name)) return true;
-    }
-    return false;
-}
-
 const MineRequest = struct {
     data: []u8,
 };
 
 const TransactionRequest = struct {
     recipient: []u8,
-    amount: f128,
+    amount: u64,
 };

@@ -5,30 +5,34 @@ const g = @import("uuid.zig");
 
 const Self = @This();
 
-transactions: std.AutoHashMapUnmanaged(g.Guid, Transaction),
+transactions: std.AutoHashMap(g.Guid, Transaction),
+address_index: std.AutoHashMap([33]u8, g.Guid),
 
-pub const init: Self = .{ .transactions = .empty };
+pub fn init(allocator: std.mem.Allocator) Self {
+    return .{
+        .transactions = std.AutoHashMap(g.Guid, Transaction).init(allocator),
+        .address_index = std.AutoHashMap([33]u8, g.Guid).init(allocator),
+    };
+}
 
 pub fn addOrUpdate(self: *Self, allocator: std.mem.Allocator, transaction: Transaction) !void {
     const entry = self.transactions.getEntry(transaction.id);
     if (entry) |e| {
         e.value_ptr.*.deinit(allocator);
         e.value_ptr.* = transaction;
-        return;
+    } else {
+        try self.transactions.put(transaction.id, transaction);
     }
-
-    try self.transactions.put(allocator, transaction.id, transaction);
+    
+    const addr = transaction.input.address.toCompressedSec1();
+    try self.address_index.put(addr, transaction.id);
 }
 
-pub fn getTransaction(self: *const Self, address: ecdsa.PublicKey) ?*Transaction {
+pub fn getTransaction(self: *const Self, address: ecdsa.PublicKey) ?Transaction {
     const addr = address.toCompressedSec1();
-    var it = self.transactions.valueIterator();
-    while (it.next()) |transaction| {
-        if (std.mem.eql(u8, &transaction.input.address.toCompressedSec1(), &addr)) {
-            return transaction;
-        }
+    if (self.address_index.get(addr)) |id| {
+        return self.transactions.get(id);
     }
-
     return null;
 }
 
@@ -37,15 +41,15 @@ pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
     while (it.next()) |transaction| {
         transaction.deinit(allocator);
     }
-
-    self.transactions.deinit(allocator);
+    self.transactions.deinit();
+    self.address_index.deinit();
     self.* = undefined;
 }
 
 test "addOrUpdate should add a transaction to the pool" {
     const Wallet = @import("Wallet.zig");
     const Random = std.Random;
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -59,7 +63,7 @@ test "addOrUpdate should add a transaction to the pool" {
         200,
     );
 
-    var pool: Self = .init;
+    var pool: Self = .init(std.testing.allocator);
     defer pool.deinit(std.testing.allocator);
 
     try pool.addOrUpdate(std.testing.allocator, transaction);
@@ -70,7 +74,7 @@ test "addOrUpdate should add a transaction to the pool" {
 test "addOrUpdate should replace an existing transaction with the same ID" {
     const Wallet = @import("Wallet.zig");
     const Random = std.Random;
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -98,7 +102,7 @@ test "addOrUpdate should replace an existing transaction with the same ID" {
     // Force transaction2 to have the same ID as transaction1
     transaction2.id = transaction1.id;
 
-    var pool: Self = .init;
+    var pool: Self = .init(std.testing.allocator);
     defer pool.deinit(std.testing.allocator);
 
     try pool.addOrUpdate(std.testing.allocator, transaction1);

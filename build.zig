@@ -7,18 +7,18 @@ pub fn build(b: *std.Build) void {
 
     const Hash = [Sha256.digest_length]u8;
     const core_opts = b.addOptions();
-    core_opts.addOption(u4, "genesis_difficulty", 2);
+    core_opts.addOption(u16, "genesis_difficulty", 16);
     core_opts.addOption(Hash, "genesis_prev_hash", @as(Hash, @splat(0)));
     core_opts.addOption([]const u8, "genesis_data", "GENESIS");
     core_opts.addOption(i64, "genesis_timestamp", 199_204);
     core_opts.addOption(u64, "genesis_nonce", 3_349);
     core_opts.addOption(u16, "mine_rate_ms", 5_000);
-    core_opts.addOption(i128, "initial_balance", 500);
+    core_opts.addOption(u64, "initial_balance", 500);
 
     const volt = b.dependency("volt", .{
         .target = target,
         .optimize = optimize,
-        .extract_enabled = true,
+        .extract = true,
     });
 
     const exe = b.addExecutable(.{

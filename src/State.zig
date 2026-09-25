@@ -39,7 +39,7 @@ pub fn init(
         .allocator = allocator,
         .lock = .init,
         .chain = try .init(allocator),
-        .transaction_pool = .init,
+        .transaction_pool = .init(allocator),
         .rand = rand.random(),
         .wallet = .init(io, null),
         .peers = .init(allocator),
@@ -104,7 +104,7 @@ pub fn createTransaction(
     self: *Self,
     io: std.Io,
     recipient: []const u8,
-    amount: f128,
+    amount: u64,
 ) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
@@ -134,7 +134,11 @@ pub fn addPeer(
     try self.lock.lock(io);
     defer self.lock.unlock(io);
     if (try self.peers.fetchPut(owned_key, peer)) |old| {
-        self.allocator.free(old.key);
+        // The key was already in the map, and fetchPut didn't replace the key.
+        // So we must free the newly allocated key to avoid a memory leak.
+        // We also must NOT free old.key, because it's still in the map!
+        _ = old;
+        self.allocator.free(owned_key);
     }
 }
 
@@ -321,7 +325,7 @@ fn walletJson(wallet: *const Wallet, writer: *std.Io.Writer) !void {
     try stringify.beginObject();
 
     try stringify.objectField("balance");
-    try stringify.print("{d:.2}", .{wallet.balance});
+    try stringify.print("{d}", .{wallet.balance});
 
     try stringify.objectField("public_key");
     try stringify.print("\"{x}\"", .{&wallet.public_key.toCompressedSec1()});
@@ -330,13 +334,13 @@ fn walletJson(wallet: *const Wallet, writer: *std.Io.Writer) !void {
 }
 
 test "walletJson outputs correct JSON" {
-    const wallet = Wallet.init(std.testing.io, 123.45);
+    const wallet = Wallet.init(std.testing.io, 123);
     var buffer: [256]u8 = undefined;
     var writer = Io.Writer.fixed(&buffer);
     try walletJson(&wallet, &writer);
     const json = buffer[0..writer.end];
     const expectedJson = try std.testing.allocator.print(
-        "{{\"balance\":123.45,\"public_key\":\"{x}\"}}",
+        "{{\"balance\":123,\"public_key\":\"{x}\"}}",
         .{&wallet.public_key.toCompressedSec1()},
     );
     defer std.testing.allocator.free(expectedJson);
@@ -382,7 +386,7 @@ test "deinit doesn't crash" {
 
     const peer_address = try Io.net.IpAddress.parse("127.0.0.1", 9090);
     var peer = try Peer.initFromAddress(allocator, peer_address);
-    defer peer.deinit(io, allocator);
+    // state.deinit will deinit the peer, so we don't need defer peer.deinit
 
     try state.addPeer(io, &peer);
 

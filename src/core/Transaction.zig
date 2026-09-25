@@ -9,13 +9,13 @@ const h = @import("hash.zig");
 
 pub const Input = struct {
     timestamp: i64,
-    amount: f128,
+    amount: u64,
     address: PublicKey,
     signature: Signature,
 };
 
 pub const Output = struct {
-    amount: f128,
+    amount: u64,
     address: PublicKey,
 };
 
@@ -31,7 +31,7 @@ pub fn init(
     rand: Random,
     sender: *const Wallet,
     recipient: PublicKey,
-    amount: f128,
+    amount: u64,
 ) !Self {
     if (amount > sender.balance) return error.AmountExceedsBalance;
     var transaction: Self = .{
@@ -73,16 +73,14 @@ pub fn update(
     allocator: std.mem.Allocator,
     sender: *const Wallet,
     recipient: PublicKey,
-    amount: f128,
+    amount: u64,
 ) !void {
     if (self.outputs.items.len == 0) return error.NoOutputs;
     const sender_output = blk: {
+        const sender_addr = sender.public_key.toCompressedSec1();
         for (self.outputs.items) |*o| {
-            if (std.mem.eql(
-                u8,
-                &o.address.toCompressedSec1(),
-                &sender.public_key.toCompressedSec1(),
-            )) break :blk o;
+            const o_addr = o.address.toCompressedSec1();
+            if (std.mem.eql(u8, &o_addr, &sender_addr)) break :blk o;
         }
 
         break :blk null;
@@ -119,13 +117,14 @@ fn sign(io: std.Io, allocator: std.mem.Allocator, transaction: *Self, sender: *c
 
 fn printOutputs(self: *const Self, writer: *std.Io.Writer) !void {
     for (self.outputs.items) |*o| {
-        try writer.printFloat(o.amount, .{ .precision = 2 });
-        try writer.printHex(&o.address.toCompressedSec1(), .lower);
+        try writer.printInt(o.amount, 10, .lower, .{});
+        const addr = o.address.toCompressedSec1();
+        try writer.printHex(&addr, .lower);
     }
 }
 
 test "init returns transaction when amount is less than wallet's balance" {
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -140,19 +139,15 @@ test "init returns transaction when amount is less than wallet's balance" {
     );
     defer transaction.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(800.00, transaction.outputs.items[0].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &wallet.public_key.toUncompressedSec1(),
-        &transaction.outputs.items[0].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(800, transaction.outputs.items[0].amount);
+    const wallet_addr = wallet.public_key.toUncompressedSec1();
+    const out_addr0 = transaction.outputs.items[0].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &wallet_addr, &out_addr0);
 
-    try std.testing.expectEqual(200.00, transaction.outputs.items[1].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &public_key.toUncompressedSec1(),
-        &transaction.outputs.items[1].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(200, transaction.outputs.items[1].amount);
+    const pub_addr = public_key.toUncompressedSec1();
+    const out_addr1 = transaction.outputs.items[1].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &pub_addr, &out_addr1);
 }
 
 test "init returns AmountExceedsBalace error when amount is greater than wallet's balance" {
@@ -174,7 +169,7 @@ test "init returns AmountExceedsBalace error when amount is greater than wallet'
 }
 
 test "init sets input amount to wallet's balance" {
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -189,11 +184,11 @@ test "init sets input amount to wallet's balance" {
     );
     defer transaction.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(1000.00, transaction.input.amount);
+    try std.testing.expectEqual(1000, transaction.input.amount);
 }
 
 test "verify returns true for valid transaction" {
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -212,7 +207,7 @@ test "verify returns true for valid transaction" {
 }
 
 test "verify returns false for tampered transaction" {
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const public_key = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -227,13 +222,13 @@ test "verify returns false for tampered transaction" {
     );
     defer transaction.deinit(std.testing.allocator);
 
-    transaction.outputs.items[0].amount = 900.00;
+    transaction.outputs.items[0].amount = 900;
 
     try std.testing.expect(!try transaction.verify(std.testing.allocator));
 }
 
 test "update modifies outputs and re-signs transaction" {
-    const wallet: Wallet = .init(std.testing.io, 1000.00);
+    const wallet: Wallet = .init(std.testing.io, 1000);
     var default_rand = Random.DefaultPrng.init(std.testing.random_seed);
     const rand = default_rand.random();
     const recipient1 = ecdsa.KeyPair.generate(std.testing.io).public_key;
@@ -257,26 +252,20 @@ test "update modifies outputs and re-signs transaction" {
         300,
     );
 
-    try std.testing.expectEqual(500.00, transaction.outputs.items[0].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &wallet.public_key.toUncompressedSec1(),
-        &transaction.outputs.items[0].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(500, transaction.outputs.items[0].amount);
+    const wallet_addr = wallet.public_key.toUncompressedSec1();
+    const out_addr0 = transaction.outputs.items[0].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &wallet_addr, &out_addr0);
 
-    try std.testing.expectEqual(200.00, transaction.outputs.items[1].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &recipient1.toUncompressedSec1(),
-        &transaction.outputs.items[1].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(200, transaction.outputs.items[1].amount);
+    const rec1_addr = recipient1.toUncompressedSec1();
+    const out_addr1 = transaction.outputs.items[1].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &rec1_addr, &out_addr1);
 
-    try std.testing.expectEqual(300.00, transaction.outputs.items[2].amount);
-    try std.testing.expectEqualSlices(
-        u8,
-        &recipient2.toUncompressedSec1(),
-        &transaction.outputs.items[2].address.toUncompressedSec1(),
-    );
+    try std.testing.expectEqual(300, transaction.outputs.items[2].amount);
+    const rec2_addr = recipient2.toUncompressedSec1();
+    const out_addr2 = transaction.outputs.items[2].address.toUncompressedSec1();
+    try std.testing.expectEqualSlices(u8, &rec2_addr, &out_addr2);
 
     try std.testing.expect(try transaction.verify(std.testing.allocator));
 }

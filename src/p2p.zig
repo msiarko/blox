@@ -378,7 +378,7 @@ pub const BlockJson = struct {
     hash: []const u8,
     timestamp: i64,
     nonce: u64,
-    difficulty: u4,
+    difficulty: u16,
     data: []const u8,
 
     pub fn toBlock(self: *const BlockJson) !Block {
@@ -402,13 +402,13 @@ pub const BlockJson = struct {
 pub const TransactionJson = struct {
     const Input = struct {
         timestamp: i64,
-        amount: f128,
+        amount: u64,
         address: [PublicKey.compressed_sec1_encoded_length]u8,
         signature: [Signature.encoded_length]u8,
     };
 
     const Output = struct {
-        amount: f128,
+        amount: u64,
         address: [PublicKey.compressed_sec1_encoded_length]u8,
     };
 
