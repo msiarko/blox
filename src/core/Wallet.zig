@@ -66,6 +66,18 @@ pub fn createTransaction(
     }
 }
 
+pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+    try stringify.beginObject();
+
+    try stringify.objectField("balance");
+    try stringify.print("{d}", .{self.balance});
+
+    try stringify.objectField("public_key");
+    try stringify.print("\"{x}\"", .{&self.public_key.toCompressedSec1()});
+
+    try stringify.endObject();
+}
+
 test "init without balance sets initial balance" {
     const wallet = Self.init(std.testing.io, null);
     try std.testing.expectEqual(options.initial_balance, wallet.balance);

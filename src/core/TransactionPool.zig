@@ -46,6 +46,15 @@ pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
     self.* = undefined;
 }
 
+pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+    try stringify.beginArray();
+    var it = self.transactions.valueIterator();
+    while (it.next()) |transaction| {
+        try stringify.write(transaction);
+    }
+    try stringify.endArray();
+}
+
 test "addOrUpdate should add a transaction to the pool" {
     const Wallet = @import("Wallet.zig");
     const Random = std.Random;

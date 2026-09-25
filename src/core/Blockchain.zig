@@ -151,6 +151,15 @@ pub fn replace(
     }
 }
 
+pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+    try stringify.beginArray();
+    for (0..self.blocks.len) |i| {
+        const b = self.blocks.get(i);
+        try stringify.write(b);
+    }
+    try stringify.endArray();
+}
+
 test "blockchain starts with genesis block" {
     const allocator = std.testing.allocator;
     var genesis_block = try Block.genesis(allocator);

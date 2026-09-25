@@ -108,7 +108,7 @@ pub const ClientWebSocket = struct {
 
         var uri_buf: [128]u8 = undefined;
         var fixed_writer = Io.Writer.fixed(&uri_buf);
-        try state.self_peer.uri.format(&fixed_writer);
+        try state.network.self_peer.uri.format(&fixed_writer);
         const blox_peer_uri = fixed_writer.buffered();
         const path_raw = switch (peer.uri.path) {
             .raw => |p| p,
@@ -273,7 +273,7 @@ pub fn connectAll(
     allocator: Allocator,
     state: AppState,
 ) !void {
-    if (state.peers.count() == 0) {
+    if (state.network.peers.count() == 0) {
         return;
     }
 
@@ -283,9 +283,9 @@ pub fn connectAll(
     {
         try state.lock.lock(io);
         defer state.lock.unlock(io);
-        var it = state.peers.valueIterator();
+        var it = state.network.peers.valueIterator();
         while (it.next()) |ptr| {
-            try peer_connections.concurrent(io, connect, .{ io, allocator, state, ptr.* });
+            try peer_connections.concurrent(io, connect, .{ io, allocator, state, ptr });
         }
     }
 
