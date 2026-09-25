@@ -6,7 +6,13 @@ const log = std.log.scoped(.network);
 const Peer = @import("../Peer.zig");
 const Blockchain = @import("Blockchain.zig");
 const Block = @import("Block.zig");
-const MessageType = @import("../p2p.zig").MessageType;
+
+pub const MessageType = enum {
+    blockchain,
+    transaction,
+    new_block,
+    request_chain,
+};
 
 pub const Network = struct {
     const Self = @This();

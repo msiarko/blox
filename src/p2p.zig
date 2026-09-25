@@ -12,6 +12,7 @@ const uuid = @import("core/uuid.zig");
 
 const Peer = @import("Peer.zig");
 const AppState = @import("routes.zig").AppState;
+const MessageType = @import("core/Network.zig").MessageType;
 
 const log = std.log.scoped(.p2p);
 
@@ -424,11 +425,4 @@ pub const BlockJson = struct {
             .data = self.data,
         };
     }
-};
-
-pub const MessageType = enum {
-    blockchain,
-    transaction,
-    new_block,
-    request_chain,
 };
