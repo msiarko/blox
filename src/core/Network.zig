@@ -53,12 +53,12 @@ pub const Network = struct {
     pub fn createPeer(self: *Self, io: Io, address: []const u8) !void {
         var peer = try Peer.parse(self.allocator, address);
         errdefer peer.deinit(io, self.allocator);
-        
+
         try self.addPeer(io, &peer);
-        
+
         var peer_key_buffer: [64]u8 = undefined;
         const peer_key = try peer.print(&peer_key_buffer);
-        
+
         log.info("Peer {s} added", .{peer_key});
     }
 
@@ -68,7 +68,7 @@ pub const Network = struct {
 
         const key_dup = try self.allocator.dupe(u8, key);
         errdefer self.allocator.free(key_dup);
-        
+
         if (try self.peers.fetchPut(key_dup, peer.*)) |old| {
             var old_peer = old.value;
             old_peer.deinit(io, self.allocator);
@@ -96,7 +96,7 @@ pub const Network = struct {
         var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(chain);
         try allocating.writer.print("}}", .{});
-        
+
         const msg = allocating.written();
         try peer.sendMessage(io, self.allocator, msg);
     }
@@ -111,7 +111,7 @@ pub const Network = struct {
         var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(chain);
         try allocating.writer.print("}}", .{});
-        
+
         const msg = try allocating.toOwnedSlice();
         defer self.allocator.free(msg);
 
@@ -132,7 +132,7 @@ pub const Network = struct {
         var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(block);
         try allocating.writer.print("}}", .{});
-        
+
         const msg = try allocating.toOwnedSlice();
         defer self.allocator.free(msg);
 

@@ -61,7 +61,7 @@ pub const ClientWebSocket = struct {
         data: []const u8,
         opcode: Opcode,
     ) !void {
-        try self.output.writeAll(&.{0x80 | @as(u8, @intFromEnum(opcode))});
+        try self.output.writeAll(&.{0x80 | @as(u8, @backingInt(opcode))});
 
         if (data.len < 126) {
             try self.output.writeAll(&.{0x80 | @as(u8, @intCast(data.len))});
@@ -162,7 +162,7 @@ pub const ClientWebSocket = struct {
         var header: [2]u8 = undefined;
         try self.readExact(&header);
 
-        const opcode: Opcode = @enumFromInt(header[0] & 0x0F);
+        const opcode: Opcode = @fromBackingInt(@intCast(header[0] & 0x0F));
         const is_masked = (header[1] & 0x80) != 0;
         var payload_len: usize = header[1] & 0x7F;
 
@@ -215,7 +215,7 @@ pub fn update(
     const type_val = obj.get("type") orelse return error.InvalidPayload;
     if (type_val != .integer) return error.InvalidPayload;
 
-    const msg_type: MessageType = @enumFromInt(type_val.integer);
+    const msg_type: MessageType = @fromBackingInt(@intCast(type_val.integer));
 
     switch (msg_type) {
         .blockchain => {

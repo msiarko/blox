@@ -114,7 +114,7 @@ test "createTransaction adds new transaction to pool" {
     const transaction = pool.getTransaction(wallet.public_key);
     try std.testing.expect(transaction != null);
     try std.testing.expectEqual(200, transaction.?.outputs.items[1].amount);
-    
+
     const rec_addr = recipient_public_key.toUncompressedSec1();
     const out_addr = transaction.?.outputs.items[1].address.toUncompressedSec1();
     try std.testing.expectEqualSlices(u8, &rec_addr, &out_addr);
@@ -156,7 +156,7 @@ test "createTransaction updates existing transaction in pool" {
     try std.testing.expectEqual(3, transaction.?.outputs.items.len);
     try std.testing.expectEqual(500, transaction.?.outputs.items[0].amount);
     try std.testing.expectEqual(300, transaction.?.outputs.items[2].amount);
-    
+
     const rec_addr = recipient_public_key.toUncompressedSec1();
     const out_addr = transaction.?.outputs.items[2].address.toUncompressedSec1();
     try std.testing.expectEqualSlices(u8, &rec_addr, &out_addr);

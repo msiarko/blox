@@ -45,7 +45,7 @@ pub fn getLastBlock(self: *const Self) !Block {
 
 pub fn isValid(self: *const Self, allocator: Allocator) !bool {
     if (self.blocks.len == 0) return false;
-    
+
     const options = @import("options");
     var balances = std.AutoHashMap([33]u8, u64).init(allocator);
     defer balances.deinit();
@@ -55,7 +55,7 @@ pub fn isValid(self: *const Self, allocator: Allocator) !bool {
         const prev_hash = self.blocks.items(.hash)[i - 1];
         if (!std.mem.eql(u8, &curr.prev_hash, &prev_hash) or !curr.isHashValid())
             return false;
-            
+
         if (curr.data.len > 0) {
             var parsed = std.json.parseFromSlice(
                 []const @import("Transaction.zig").Json,
@@ -67,24 +67,24 @@ pub fn isValid(self: *const Self, allocator: Allocator) !bool {
                 else => return false,
             };
             defer parsed.deinit();
-            
+
             for (parsed.value) |tx_json| {
                 var tx = tx_json.toTransaction(allocator) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => return false,
                 };
                 defer tx.deinit(allocator);
-                
+
                 if (!try tx.verify(allocator)) return false;
-                
+
                 const addr = tx.input.address.toCompressedSec1();
                 const bal = balances.get(addr) orelse options.initial_balance;
                 if (tx.input.amount > bal) return false;
-                
+
                 var out_sum: u64 = 0;
                 for (tx.outputs.items) |o| out_sum += o.amount;
                 if (out_sum != tx.input.amount) return false;
-                
+
                 try balances.put(addr, bal - tx.input.amount);
                 for (tx.outputs.items) |o| {
                     const o_addr = o.address.toCompressedSec1();
@@ -311,7 +311,7 @@ test "replace frees memomy on OOM during append" {
 
     var blockchain = try init(allocator);
     defer blockchain.deinit(allocator);
-    
+
     try blockchain.add(io, allocator, "[]");
 
     var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 1 });

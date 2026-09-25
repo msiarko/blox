@@ -174,7 +174,7 @@ test "addPeer frees old entry on duplicate" {
     var peer = try Peer.initFromAddress(allocator, peer_address);
 
     try state.addPeer(io, &peer);
-    
+
     // Add again to test freeing old entry
     var peer2 = try Peer.initFromAddress(allocator, peer_address);
     try state.addPeer(io, &peer2);

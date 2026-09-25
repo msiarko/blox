@@ -23,7 +23,7 @@ pub fn addOrUpdate(self: *Self, allocator: std.mem.Allocator, transaction: Trans
     } else {
         try self.transactions.put(transaction.id, transaction);
     }
-    
+
     const addr = transaction.input.address.toCompressedSec1();
     try self.address_index.put(addr, transaction.id);
 }

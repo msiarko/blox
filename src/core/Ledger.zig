@@ -19,7 +19,7 @@ pub const Ledger = struct {
 
     pub fn init(io: Io, allocator: Allocator) !Self {
         const wallet: Wallet = .init(io, null);
-        
+
         var chain: Blockchain = try .init(allocator);
         errdefer chain.deinit(allocator);
 
@@ -51,13 +51,13 @@ pub const Ledger = struct {
     pub fn mineBlock(self: *Self, io: Io) !void {
         var allocating = std.Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();
-        
+
         var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(&self.transaction_pool);
-        
+
         const data = allocating.written();
         try self.chain.add(io, self.allocator, data);
-        
+
         self.transaction_pool.transactions.clearRetainingCapacity();
         self.transaction_pool.address_index.clearRetainingCapacity();
     }
@@ -65,12 +65,12 @@ pub const Ledger = struct {
     pub fn appendBlock(self: *Self, block: *const Block) !void {
         const last = try self.chain.getLastBlock();
         if (!std.mem.eql(u8, &block.prev_hash, &last.hash)) return error.InvalidChain;
-        
+
         if (!block.isHashValid()) return error.InvalidChain;
-        
+
         const data = try self.allocator.dupe(u8, block.data);
         errdefer self.allocator.free(data);
-        
+
         try self.chain.blocks.append(self.allocator, .{
             .timestamp = block.timestamp,
             .prev_hash = block.prev_hash,
@@ -79,7 +79,7 @@ pub const Ledger = struct {
             .difficulty = block.difficulty,
             .data = data,
         });
-        
+
         if (!try self.chain.isValid(self.allocator)) {
             const popped = self.chain.blocks.pop().?;
             self.allocator.free(popped.data);
