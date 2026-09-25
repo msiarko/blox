@@ -19,6 +19,49 @@ pub const Output = struct {
     address: PublicKey,
 };
 
+pub const Json = struct {
+    pub const InputJson = struct {
+        timestamp: i64,
+        amount: u64,
+        address: [PublicKey.compressed_sec1_encoded_length]u8,
+        signature: [Signature.encoded_length]u8,
+    };
+
+    pub const OutputJson = struct {
+        amount: u64,
+        address: [PublicKey.compressed_sec1_encoded_length]u8,
+    };
+
+    id: [uuid.length]u8,
+    input: InputJson,
+    outputs: []const OutputJson,
+
+    pub fn toTransaction(self: *const Json, allocator: std.mem.Allocator) !Self {
+        const id = self.id;
+
+        const input = Input{
+            .timestamp = self.input.timestamp,
+            .amount = self.input.amount,
+            .address = try PublicKey.fromSec1(&self.input.address),
+            .signature = Signature.fromBytes(self.input.signature),
+        };
+
+        var outputs = try std.ArrayList(Output).initCapacity(allocator, self.outputs.len);
+        for (self.outputs) |o| {
+            outputs.appendAssumeCapacity(.{
+                .amount = o.amount,
+                .address = try PublicKey.fromSec1(&o.address),
+            });
+        }
+
+        return .{
+            .id = id,
+            .input = input,
+            .outputs = outputs,
+        };
+    }
+};
+
 const Self = @This();
 
 id: uuid.Guid,

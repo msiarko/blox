@@ -105,10 +105,8 @@ fn blocks(ctx: volt.Context, state: AppState) !volt.Response {
 fn createBlock(
     ctx: volt.Context,
     state: AppState,
-    mine_request: volt.extract.Json(MineRequest),
 ) !volt.Response {
-    const payload = mine_request.value;
-    try state.createBlock(ctx.io, payload.data);
+    try state.mineBlock(ctx.io);
     try state.broadcastChain(ctx.io);
     return .ok(ctx.req_arena, "Block mined successfully", null);
 }
@@ -133,10 +131,6 @@ fn createTransaction(
 
     return .ok(ctx.req_arena, "Transaction created successfully", null);
 }
-
-const MineRequest = struct {
-    data: []u8,
-};
 
 const TransactionRequest = struct {
     recipient: []u8,

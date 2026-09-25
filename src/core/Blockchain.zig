@@ -43,13 +43,56 @@ pub fn getLastBlock(self: *const Self) !Block {
     return self.blocks.get(self.blocks.len - 1);
 }
 
-fn isValid(self: *const Self) !bool {
+fn isValid(self: *const Self, allocator: Allocator) !bool {
     if (self.blocks.len == 0) return false;
+    
+    const options = @import("options");
+    var balances = std.AutoHashMap([33]u8, u64).init(allocator);
+    defer balances.deinit();
+
     for (1..self.blocks.len) |i| {
         const curr = self.blocks.get(i);
         const prev_hash = self.blocks.items(.hash)[i - 1];
         if (!std.mem.eql(u8, &curr.prev_hash, &prev_hash) or !curr.isHashValid())
             return false;
+            
+        if (curr.data.len > 0) {
+            var parsed = std.json.parseFromSlice(
+                []const @import("Transaction.zig").Json,
+                allocator,
+                curr.data,
+                .{ .allocate = .alloc_always },
+            ) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return false,
+            };
+            defer parsed.deinit();
+            
+            for (parsed.value) |tx_json| {
+                var tx = tx_json.toTransaction(allocator) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    else => return false,
+                };
+                defer tx.deinit(allocator);
+                
+                if (!try tx.verify(allocator)) return false;
+                
+                const addr = tx.input.address.toCompressedSec1();
+                const bal = balances.get(addr) orelse options.initial_balance;
+                if (tx.input.amount > bal) return false;
+                
+                var out_sum: u64 = 0;
+                for (tx.outputs.items) |o| out_sum += o.amount;
+                if (out_sum != tx.input.amount) return false;
+                
+                try balances.put(addr, bal - tx.input.amount);
+                for (tx.outputs.items) |o| {
+                    const o_addr = o.address.toCompressedSec1();
+                    const ob = balances.get(o_addr) orelse options.initial_balance;
+                    try balances.put(o_addr, ob + o.amount);
+                }
+            }
+        }
     }
 
     return true;
@@ -85,7 +128,7 @@ pub fn replace(
     chain: *const Self,
 ) !void {
     if (self.blocks.len >= chain.blocks.len) return error.ShortBlockchain;
-    if (!try chain.isValid()) return error.InvalidChain;
+    if (!try chain.isValid(allocator)) return error.InvalidChain;
     for (0..self.blocks.len) |i| {
         const self_block = self.blocks.get(i);
         const chain_block = chain.blocks.get(i);
@@ -127,10 +170,10 @@ test "blockchain adds new block" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    try blockchain.add(io, allocator, "some data");
+    try blockchain.add(io, allocator, "[]");
 
     const last_block = try blockchain.getLastBlock();
-    try std.testing.expectEqualSlices(u8, "some data", last_block.data);
+    try std.testing.expectEqualSlices(u8, "[]", last_block.data);
 }
 
 test "blockchain is valid if no data corrupted" {
@@ -139,8 +182,8 @@ test "blockchain is valid if no data corrupted" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    try blockchain.add(io, allocator, "some data");
-    try std.testing.expect(try blockchain.isValid());
+    try blockchain.add(io, allocator, "[]");
+    try std.testing.expect(try blockchain.isValid(allocator));
 }
 
 test "blockchain is not valid if data corrupted" {
@@ -149,13 +192,13 @@ test "blockchain is not valid if data corrupted" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    try blockchain.add(io, allocator, "Some data");
+    try blockchain.add(io, allocator, "[]");
     const block = try blockchain.getLastBlock();
-    try blockchain.add(io, allocator, "Another data");
+    try blockchain.add(io, allocator, "[]");
 
-    @constCast(block.data)[0] = 'C';
+    @constCast(block.data)[0] = '{'; // Break the JSON or hash
 
-    try std.testing.expect(!try blockchain.isValid());
+    try std.testing.expect(!try blockchain.isValid(allocator));
 }
 
 test "blockchain replaces if chain is valid" {
@@ -167,8 +210,8 @@ test "blockchain replaces if chain is valid" {
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
-    try blockchain.add(io, allocator, "Some data");
-    try blockchain.add(io, allocator, "Another data");
+    try blockchain.add(io, allocator, "[]");
+    try blockchain.add(io, allocator, "[]");
 
     try initial.replace(allocator, &blockchain);
     try std.testing.expect(initial.blocks.len == blockchain.blocks.len);
@@ -180,12 +223,12 @@ test "blockchain not replaces if incoming chain is shorter" {
     var initial: Self = try .init(allocator);
     defer initial.deinit(allocator);
 
-    try initial.add(io, allocator, "Some data");
+    try initial.add(io, allocator, "[]");
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
     try blockchain.replace(allocator, &initial);
-    try initial.add(io, allocator, "Another data");
+    try initial.add(io, allocator, "[]");
 
     try std.testing.expectError(error.ShortBlockchain, initial.replace(allocator, &blockchain));
 }
@@ -196,7 +239,7 @@ test "blockchain not replaces if incoming chain is same length" {
     var initial: Self = try .init(allocator);
     defer initial.deinit(allocator);
 
-    try initial.add(io, allocator, "Some data");
+    try initial.add(io, allocator, "[]");
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
@@ -211,15 +254,15 @@ test "blockchain not replaces if incoming chain is invalid" {
     var initial: Self = try .init(allocator);
     defer initial.deinit(allocator);
 
-    try initial.add(io, allocator, "Some data");
+    try initial.add(io, allocator, "[]");
     var blockchain: Self = try .init(allocator);
     defer blockchain.deinit(allocator);
 
     try blockchain.replace(allocator, &initial);
-    try blockchain.add(io, allocator, "Another data");
+    try blockchain.add(io, allocator, "[]");
 
     const last_block = try blockchain.getLastBlock();
-    @constCast(last_block.data)[0] = 'C';
+    @constCast(last_block.data)[0] = '{';
 
     try std.testing.expectError(error.InvalidChain, initial.replace(allocator, &blockchain));
 }
@@ -229,11 +272,11 @@ test "fromSlice frees memory on OOM" {
     var genesis_block = try Block.genesis(allocator);
     defer genesis_block.deinit(allocator);
 
-    const data1 = "Block 1 data";
+    const data1 = "[]";
     var block1 = try Block.init(std.testing.io, allocator, &genesis_block, data1);
     defer block1.deinit(allocator);
 
-    const data2 = "Block 2 data";
+    const data2 = "[]";
     var block2 = try Block.init(std.testing.io, allocator, &block1, data2);
     defer block2.deinit(allocator);
 
@@ -255,13 +298,12 @@ test "replace frees memomy on OOM during append" {
 
     var initial = try init(allocator);
     defer initial.deinit(allocator);
-    initial.blocks.shrinkAndFree(allocator, 1); // Force append to allocate
+    initial.blocks.shrinkAndFree(allocator, 1);
 
     var blockchain = try init(allocator);
     defer blockchain.deinit(allocator);
     
-    // Just mine 1 block to make blockchain longer than initial
-    try blockchain.add(io, allocator, "dummy block");
+    try blockchain.add(io, allocator, "[]");
 
     var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 1 });
     const failing_alloc = failing.allocator();

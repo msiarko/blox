@@ -399,24 +399,6 @@ pub const BlockJson = struct {
     }
 };
 
-pub const TransactionJson = struct {
-    const Input = struct {
-        timestamp: i64,
-        amount: u64,
-        address: [PublicKey.compressed_sec1_encoded_length]u8,
-        signature: [Signature.encoded_length]u8,
-    };
-
-    const Output = struct {
-        amount: u64,
-        address: [PublicKey.compressed_sec1_encoded_length]u8,
-    };
-
-    id: [uuid.length]u8,
-    input: Input,
-    outputs: []const Output,
-};
-
 pub const MessageType = enum {
     blockchain,
     transaction,

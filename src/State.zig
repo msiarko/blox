@@ -166,14 +166,59 @@ pub fn sendToPeer(
     try peer.sendMessage(io, self.allocator, msg);
 }
 
-pub fn createBlock(
+pub fn mineBlock(
     self: *Self,
     io: Io,
-    data: []const u8,
 ) !void {
     try self.lock.lock(io);
     defer self.lock.unlock(io);
-    return self.chain.add(io, self.allocator, data);
+    
+    var allocating = std.Io.Writer.Allocating.init(self.allocator);
+    defer allocating.deinit();
+    
+    var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
+    try stringify.beginArray();
+    
+    var it = self.transaction_pool.transactions.valueIterator();
+    while (it.next()) |tx| {
+        try stringify.beginObject();
+
+        try stringify.objectField("id");
+        try stringify.print("\"{s}\"", .{tx.id});
+
+        try stringify.objectField("input");
+        try stringify.beginObject();
+        try stringify.objectField("timestamp");
+        try stringify.print("{d}", .{tx.input.timestamp});
+        try stringify.objectField("amount");
+        try stringify.print("{d}", .{tx.input.amount});
+        try stringify.objectField("address");
+        try stringify.print("\"{x}\"", .{&tx.input.address.toCompressedSec1()});
+        try stringify.objectField("signature");
+        try stringify.print("\"{x}\"", .{&tx.input.signature.toBytes()});
+        try stringify.endObject();
+
+        try stringify.objectField("outputs");
+        try stringify.beginArray();
+        for (tx.outputs.items) |o| {
+            try stringify.beginObject();
+            try stringify.objectField("amount");
+            try stringify.print("{d}", .{o.amount});
+            try stringify.objectField("address");
+            try stringify.print("\"{x}\"", .{&o.address.toCompressedSec1()});
+            try stringify.endObject();
+        }
+        try stringify.endArray();
+
+        try stringify.endObject();
+    }
+    try stringify.endArray();
+    
+    const data = allocating.written();
+    try self.chain.add(io, self.allocator, data);
+    
+    self.transaction_pool.transactions.clearRetainingCapacity();
+    self.transaction_pool.address_index.clearRetainingCapacity();
 }
 
 pub fn replaceChain(
