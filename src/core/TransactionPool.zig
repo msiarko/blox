@@ -1,4 +1,6 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Stringify = std.json.Stringify;
 const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 const Transaction = @import("Transaction.zig");
 const g = @import("uuid.zig");
@@ -8,14 +10,14 @@ const Self = @This();
 transactions: std.AutoHashMap(g.Guid, Transaction),
 address_index: std.AutoHashMap([33]u8, g.Guid),
 
-pub fn init(allocator: std.mem.Allocator) Self {
+pub fn init(allocator: Allocator) Self {
     return .{
         .transactions = std.AutoHashMap(g.Guid, Transaction).init(allocator),
         .address_index = std.AutoHashMap([33]u8, g.Guid).init(allocator),
     };
 }
 
-pub fn addOrUpdate(self: *Self, allocator: std.mem.Allocator, transaction: Transaction) !void {
+pub fn addOrUpdate(self: *Self, allocator: Allocator, transaction: Transaction) !void {
     const entry = self.transactions.getEntry(transaction.id);
     if (entry) |e| {
         e.value_ptr.*.deinit(allocator);
@@ -36,7 +38,7 @@ pub fn getTransaction(self: *const Self, address: ecdsa.PublicKey) ?Transaction 
     return null;
 }
 
-pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+pub fn deinit(self: *Self, allocator: Allocator) void {
     var it = self.transactions.valueIterator();
     while (it.next()) |transaction| {
         transaction.deinit(allocator);
@@ -46,7 +48,7 @@ pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
     self.* = undefined;
 }
 
-pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+pub fn jsonStringify(self: *const Self, stringify: *Stringify) !void {
     try stringify.beginArray();
     var it = self.transactions.valueIterator();
     while (it.next()) |transaction| {

@@ -1,6 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const Uri = std.Uri;
+const IpAddress = Io.net.IpAddress;
 const log = std.log;
 
 const Self = @This();
@@ -13,7 +15,7 @@ buffer: [][]const u8,
 pub fn init(allocator: Allocator, peer_uri: []const u8) !Self {
     const buffer = try allocator.alloc([]const u8, 1);
     return .{
-        .uri = try std.Uri.parse(peer_uri),
+        .uri = try Uri.parse(peer_uri),
         .buffer = buffer,
         .message_queue = .init(buffer),
         .uri_buf = null,
@@ -56,10 +58,10 @@ pub fn getPort(self: *const Self) u16 {
     return self.uri.port orelse 80;
 }
 
-pub fn getAddress(self: *const Self) !Io.net.IpAddress {
+pub fn getAddress(self: *const Self) !IpAddress {
     const host = try self.getHost();
     const port = self.getPort();
-    return try Io.net.IpAddress.parse(host, port);
+    return try IpAddress.parse(host, port);
 }
 
 pub fn print(self: *const Self, buffer: []u8) ![]u8 {
@@ -72,7 +74,7 @@ pub fn parse(allocator: Allocator, peer_uri: []const u8) !Self {
     return .init(allocator, peer_uri);
 }
 
-pub fn initFromAddress(allocator: Allocator, address: Io.net.IpAddress) !Self {
+pub fn initFromAddress(allocator: Allocator, address: IpAddress) !Self {
     const ip = address.ip4.bytes;
     const uri_string = try allocator.print(
         "ws://{d}.{d}.{d}.{d}:{d}",
@@ -81,7 +83,7 @@ pub fn initFromAddress(allocator: Allocator, address: Io.net.IpAddress) !Self {
     errdefer allocator.free(uri_string);
     const buffer = try allocator.alloc([]const u8, 1);
     return .{
-        .uri = try std.Uri.parse(uri_string),
+        .uri = try Uri.parse(uri_string),
         .buffer = buffer,
         .message_queue = .init(buffer),
         .uri_buf = uri_string,

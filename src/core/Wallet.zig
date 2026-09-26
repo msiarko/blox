@@ -1,4 +1,7 @@
 const std = @import("std");
+const Io = std.Io;
+const Allocator = std.mem.Allocator;
+const Stringify = std.json.Stringify;
 const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 const options = @import("options");
 const Transaction = @import("Transaction.zig");
@@ -11,7 +14,7 @@ balance: u64,
 key_pair: ecdsa.KeyPair,
 public_key: ecdsa.PublicKey,
 
-pub fn init(io: std.Io, balance: ?u64) Self {
+pub fn init(io: Io, balance: ?u64) Self {
     const key_pair = ecdsa.KeyPair.generate(io);
     return .{
         .balance = balance orelse options.initial_balance,
@@ -26,8 +29,8 @@ pub fn sign(self: *const Self, hash: h.Hash) !ecdsa.Signature {
 
 pub fn createTransaction(
     self: *const Self,
-    io: std.Io,
-    allocator: std.mem.Allocator,
+    io: Io,
+    allocator: Allocator,
     rand: std.Random,
     recipient: ecdsa.PublicKey,
     amount: u64,
@@ -66,7 +69,7 @@ pub fn createTransaction(
     }
 }
 
-pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+pub fn jsonStringify(self: *const Self, stringify: *Stringify) !void {
     try stringify.beginObject();
 
     try stringify.objectField("balance");

@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.network);
+const Stringify = std.json.Stringify;
 
 const Peer = @import("../Peer.zig");
 const Blockchain = @import("Blockchain.zig");
@@ -89,11 +90,11 @@ pub const Network = struct {
     }
 
     pub fn sendToPeer(self: *Self, io: Io, peer: *Peer, chain: *const Blockchain) !void {
-        var allocating = std.Io.Writer.Allocating.init(self.allocator);
+        var allocating = Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();
 
         try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{MessageType.blockchain});
-        var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
+        var stringify: Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(chain);
         try allocating.writer.print("}}", .{});
 
@@ -104,18 +105,18 @@ pub const Network = struct {
     pub fn broadcastChain(self: *Self, io: Io, chain: *const Blockchain) !void {
         if (self.peers.count() == 0) return;
 
-        var allocating = std.Io.Writer.Allocating.init(self.allocator);
+        var allocating = Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();
 
         try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{MessageType.blockchain});
-        var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
+        var stringify: Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(chain);
         try allocating.writer.print("}}", .{});
 
         const msg = try allocating.toOwnedSlice();
         defer self.allocator.free(msg);
 
-        var group: std.Io.Group = .init;
+        var group: Io.Group = .init;
         errdefer group.cancel(io);
         var it = self.peers.valueIterator();
         while (it.next()) |peer_ptr| group.async(io, publish, .{ io, self.allocator, peer_ptr, msg });
@@ -125,18 +126,18 @@ pub const Network = struct {
     pub fn broadcastNewBlock(self: *Self, io: Io, block: *const Block) !void {
         if (self.peers.count() == 0) return;
 
-        var allocating = std.Io.Writer.Allocating.init(self.allocator);
+        var allocating = Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();
 
         try allocating.writer.print("{{\"type\": {d}, \"data\": ", .{MessageType.new_block});
-        var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
+        var stringify: Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(block);
         try allocating.writer.print("}}", .{});
 
         const msg = try allocating.toOwnedSlice();
         defer self.allocator.free(msg);
 
-        var group: std.Io.Group = .init;
+        var group: Io.Group = .init;
         errdefer group.cancel(io);
         var it = self.peers.valueIterator();
         while (it.next()) |peer_ptr| group.async(io, publish, .{ io, self.allocator, peer_ptr, msg });
@@ -146,7 +147,7 @@ pub const Network = struct {
     pub fn broadcastRequestChain(self: *Self, io: Io) !void {
         if (self.peers.count() == 0) return;
 
-        const msg = try std.fmt.allocPrint(self.allocator, "{{\"type\": {d}}}", .{MessageType.request_chain});
+        const msg = try self.allocator.print("{{\"type\": {d}}}", .{MessageType.request_chain});
         defer self.allocator.free(msg);
 
         var group: std.Io.Group = .init;

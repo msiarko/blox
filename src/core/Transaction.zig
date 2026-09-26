@@ -1,4 +1,7 @@
 const std = @import("std");
+const Io = std.Io;
+const Allocator = std.mem.Allocator;
+const Stringify = std.json.Stringify;
 const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
 const PublicKey = ecdsa.PublicKey;
 const Signature = ecdsa.Signature;
@@ -36,7 +39,7 @@ pub const Json = struct {
     input: InputJson,
     outputs: []const OutputJson,
 
-    pub fn toTransaction(self: *const Json, allocator: std.mem.Allocator) !Self {
+    pub fn toTransaction(self: *const Json, allocator: Allocator) !Self {
         const id = self.id;
 
         const input = Input{
@@ -69,8 +72,8 @@ input: Input,
 outputs: std.ArrayList(Output),
 
 pub fn init(
-    io: std.Io,
-    allocator: std.mem.Allocator,
+    io: Io,
+    allocator: Allocator,
     rand: Random,
     sender: *const Wallet,
     recipient: PublicKey,
@@ -96,8 +99,8 @@ pub fn init(
     return transaction;
 }
 
-pub fn verify(self: *const Self, allocator: std.mem.Allocator) !bool {
-    var allocating: std.Io.Writer.Allocating = .init(allocator);
+pub fn verify(self: *const Self, allocator: Allocator) !bool {
+    var allocating: Io.Writer.Allocating = .init(allocator);
     defer allocating.deinit();
 
     try self.printOutputs(&allocating.writer);
@@ -112,8 +115,8 @@ pub fn verify(self: *const Self, allocator: std.mem.Allocator) !bool {
 
 pub fn update(
     self: *Self,
-    io: std.Io,
-    allocator: std.mem.Allocator,
+    io: Io,
+    allocator: Allocator,
     sender: *const Wallet,
     recipient: PublicKey,
     amount: u64,
@@ -139,26 +142,26 @@ pub fn update(
     try Self.sign(io, allocator, self, sender);
 }
 
-pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+pub fn deinit(self: *Self, allocator: Allocator) void {
     self.outputs.deinit(allocator);
     self.* = undefined;
 }
 
-fn sign(io: std.Io, allocator: std.mem.Allocator, transaction: *Self, sender: *const Wallet) !void {
-    var allocating: std.Io.Writer.Allocating = .init(allocator);
+fn sign(io: std.Io, allocator: Allocator, transaction: *Self, sender: *const Wallet) !void {
+    var allocating: Io.Writer.Allocating = .init(allocator);
     defer allocating.deinit();
 
     try transaction.printOutputs(&allocating.writer);
     const outputs = allocating.written();
     transaction.input = .{
-        .timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds(),
+        .timestamp = Io.Timestamp.now(io, .real).toMilliseconds(),
         .amount = sender.balance,
         .address = sender.public_key,
         .signature = try sender.sign(h.hash(&.{outputs})),
     };
 }
 
-fn printOutputs(self: *const Self, writer: *std.Io.Writer) !void {
+fn printOutputs(self: *const Self, writer: *Io.Writer) !void {
     for (self.outputs.items) |*o| {
         try writer.printInt(o.amount, 10, .lower, .{});
         const addr = o.address.toCompressedSec1();
@@ -166,7 +169,7 @@ fn printOutputs(self: *const Self, writer: *std.Io.Writer) !void {
     }
 }
 
-pub fn jsonStringify(self: *const Self, stringify: *std.json.Stringify) !void {
+pub fn jsonStringify(self: *const Self, stringify: *Stringify) !void {
     try stringify.beginObject();
 
     try stringify.objectField("id");

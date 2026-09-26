@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const options = @import("options");
 pub const Block = @import("Block.zig");
 const Hash = Block.Hash;
 
@@ -45,8 +46,6 @@ pub fn getLastBlock(self: *const Self) !Block {
 
 pub fn isValid(self: *const Self, allocator: Allocator) !bool {
     if (self.blocks.len == 0) return false;
-
-    const options = @import("options");
     var balances = std.AutoHashMap([33]u8, u64).init(allocator);
     defer balances.deinit();
 

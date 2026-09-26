@@ -1,6 +1,9 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const DefaultPrng = std.Random.DefaultPrng;
+const Ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
+const Stringify = std.json.Stringify;
 
 const Blockchain = @import("Blockchain.zig");
 const TransactionPool = @import("TransactionPool.zig");
@@ -31,7 +34,7 @@ pub const Ledger = struct {
             .chain = chain,
             .transaction_pool = .init(allocator),
             .wallet = wallet,
-            .prng = std.Random.DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMilliseconds())),
+            .prng = DefaultPrng.init(@intCast(Io.Timestamp.now(io, .real).toMilliseconds())),
         };
     }
 
@@ -43,16 +46,22 @@ pub const Ledger = struct {
     pub fn createTransaction(self: *Self, io: Io, recipient_addr: []const u8, amount: u64) !void {
         var buf: [33]u8 = undefined;
         const sec1 = try std.fmt.hexToBytes(&buf, recipient_addr);
-        const ecdsa = std.crypto.sign.ecdsa.EcdsaSecp256k1Sha256;
-        const pub_key = try ecdsa.PublicKey.fromSec1(sec1);
-        try self.wallet.createTransaction(io, self.allocator, self.prng.random(), pub_key, amount, &self.transaction_pool);
+        const pub_key = try Ecdsa.PublicKey.fromSec1(sec1);
+        try self.wallet.createTransaction(
+            io,
+            self.allocator,
+            self.prng.random(),
+            pub_key,
+            amount,
+            &self.transaction_pool,
+        );
     }
 
     pub fn mineBlock(self: *Self, io: Io) !void {
-        var allocating = std.Io.Writer.Allocating.init(self.allocator);
+        var allocating = Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();
 
-        var stringify: std.json.Stringify = .{ .writer = &allocating.writer, .options = .{} };
+        var stringify: Stringify = .{ .writer = &allocating.writer, .options = .{} };
         try stringify.write(&self.transaction_pool);
 
         const data = allocating.written();
