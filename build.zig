@@ -18,7 +18,6 @@ pub fn build(b: *std.Build) void {
     const volt = b.dependency("volt", .{
         .target = target,
         .optimize = optimize,
-        .extract = true,
     });
 
     const exe = b.addExecutable(.{
