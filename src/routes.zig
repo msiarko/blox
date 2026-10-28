@@ -34,10 +34,7 @@ fn webSockets(
     state: AppState,
     peer_uri_header: volt.extract.Header("Blox-Peer-Uri"),
 ) !volt.Response {
-    const peer_uri = peer_uri_header.value orelse {
-        return .text(ctx.req_arena, .bad_request, "Missing Blox-Peer-Uri header", null);
-    };
-
+    const peer_uri = peer_uri_header.value;
     const ws_ext = try WebSocketExtractor.init(ctx);
     var ws = ws_ext.socket;
     var peer = try Peer.parse(state.allocator, peer_uri);
